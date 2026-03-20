@@ -433,16 +433,52 @@ namespace TiaTracker.Core
 
             // ── 3. Find ALL output points and generate lines ───────────────────
 
-            // 3a. Coils (LAD/FBD output coils — every type)
+            // 3a. Coils e flip-flops de saída (LAD/FBD)
             foreach (var kv in partMap)
             {
                 var partName = kv.Value.Attribute("Name")?.Value ?? "";
                 bool isCoilType = partName == "Coil"  || partName == "SCoil" || partName == "RCoil"
-                               || partName == "PCoil" || partName == "NCoil";
+                               || partName == "PCoil" || partName == "NCoil"
+                               || partName == "Sr"    || partName == "Rs";   // Set/Reset flip-flops
                 if (!isCoilType) continue;
 
                 var uid = kv.Key;
 
+                // ── Flip-flops Sr / Rs — lógica especial com portas S/R1 e S1/R ──
+                if (partName == "Sr" || partName == "Rs")
+                {
+                    // Operand (InOut) — variável controlada
+                    string ffOperand = "";
+                    if (wireFrom.TryGetValue((uid, "operand"), out var ffOpSrc))
+                        ffOperand = ResolveNode(ffOpSrc.uid, ffOpSrc.port, accessMap, partMap, callMap, wireFrom, 0);
+                    if (string.IsNullOrEmpty(ffOperand)) ffOperand = "?";
+
+                    if (partName == "Sr")
+                    {
+                        // Sr: R1 tem prioridade sobre S
+                        string sIn  = "(sem ligação)";
+                        string r1In = "(sem ligação)";
+                        if (wireFrom.TryGetValue((uid, "S"),  out var sSrc))  sIn  = ResolveNode(sSrc.uid,  sSrc.port,  accessMap, partMap, callMap, wireFrom, 0);
+                        if (wireFrom.TryGetValue((uid, "R1"), out var r1Src)) r1In = ResolveNode(r1Src.uid, r1Src.port, accessMap, partMap, callMap, wireFrom, 0);
+                        result.Add($"SR flip-flop  {ffOperand}:  // R1 tem prioridade");
+                        result.Add($"  S  := {sIn}");
+                        result.Add($"  R1 := {r1In}");
+                    }
+                    else // Rs
+                    {
+                        // Rs: S1 tem prioridade sobre R
+                        string s1In = "(sem ligação)";
+                        string rIn  = "(sem ligação)";
+                        if (wireFrom.TryGetValue((uid, "S1"), out var s1Src)) s1In = ResolveNode(s1Src.uid, s1Src.port, accessMap, partMap, callMap, wireFrom, 0);
+                        if (wireFrom.TryGetValue((uid, "R"),  out var rSrc))  rIn  = ResolveNode(rSrc.uid,  rSrc.port,  accessMap, partMap, callMap, wireFrom, 0);
+                        result.Add($"RS flip-flop  {ffOperand}:  // S1 tem prioridade");
+                        result.Add($"  S1 := {s1In}");
+                        result.Add($"  R  := {rIn}");
+                    }
+                    continue;
+                }
+
+                // ── Coils normais ─────────────────────────────────────────────────
                 string operand = "";
                 if (wireFrom.TryGetValue((uid, "operand"), out var opSrc))
                     operand = ResolveNode(opSrc.uid, opSrc.port, accessMap, partMap, callMap, wireFrom, 0);
@@ -536,7 +572,8 @@ namespace TiaTracker.Core
             {
                 var partName = kv.Value.Attribute("Name")?.Value ?? "";
                 bool isCoilType = partName == "Coil" || partName == "SCoil" || partName == "RCoil"
-                               || partName == "PCoil" || partName == "NCoil";
+                               || partName == "PCoil" || partName == "NCoil"
+                               || partName == "Sr"    || partName == "Rs";
                 if (isCoilType) continue;
 
                 var uid = kv.Key;
@@ -868,8 +905,8 @@ namespace TiaTracker.Core
                 case "Delete":  return $"DELETE(IN:={Inp("IN")}, L:={Inp("L")}, P:={Inp("P")})";
 
                 // ── RS/SR flip-flops ──────────────────────────────────────────
-                case "RS": return $"RS(S:={Inp("S")}, R1:={Inp("R1")})";
-                case "SR": return $"SR(S1:={Inp("S1")}, R:={Inp("R")})";
+                case "RS": case "Rs": return $"RS flip-flop: S1:={Inp("S1")}, R:={Inp("R")}";
+                case "SR": case "Sr": return $"SR flip-flop: S:={Inp("S")}, R1:={Inp("R1")}";
 
                 // ── Edge detection ────────────────────────────────────────────
                 case "PBox": case "RLO_P": return $"P_TRIG({Inp("CLK")})";
