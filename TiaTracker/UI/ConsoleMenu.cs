@@ -38,6 +38,7 @@ namespace TiaTracker.UI
                     case "3": DoOnlineCompare();   break;
                     case "4": DoListSnapshots();   break;
                     case "5": DoReadBlocks();      break;
+                    case "6": DoCallGraph();       break;
                     case "0":                      return;
                     default:
                         Console.WriteLine("  Opção inválida.\n");
@@ -56,6 +57,7 @@ namespace TiaTracker.UI
             Console.WriteLine("│  [3]  Comparar Projecto vs PLC Online      │");
             Console.WriteLine("│  [4]  Listar snapshots                     │");
             Console.WriteLine("│  [5]  Ler blocos do projecto (FC/FB/OB)    │");
+            Console.WriteLine("│  [6]  Grafo de chamadas                    │");
             Console.WriteLine("│  [0]  Sair                                 │");
             Console.WriteLine("└────────────────────────────────────────────┘");
         }
@@ -417,7 +419,37 @@ namespace TiaTracker.UI
             Console.WriteLine(new string('═', 60));
             Console.WriteLine($"\n  Total: {blocks.Count} blocos lidos.\n");
 
-            SaveBlocksReport(blocks);
+            var callGraph  = ProjectReader.BuildCallGraph(blocks);
+            var graphLines = BuildCallGraphLines(blocks, callGraph);
+            PrintCallGraph(graphLines);
+
+            SaveBlocksReport(blocks, graphLines);
+        }
+
+        private void DoCallGraph()
+        {
+            Console.WriteLine("  A construir grafo de chamadas...\n");
+
+            var reader    = new ProjectReader(_conn.Project);
+            var blocks    = reader.ReadAllBlocks();
+            var callGraph = ProjectReader.BuildCallGraph(blocks);
+            var lines     = BuildCallGraphLines(blocks, callGraph);
+
+            PrintCallGraph(lines);
+
+            // Salvar ficheiro dedicado
+            var dir  = _snapshots.GetReportDir();
+            Directory.CreateDirectory(dir);
+            var file = Path.Combine(dir, $"call_graph_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
+            var report = new List<string>();
+            report.Add("TIA Tracker — Grafo de Chamadas");
+            report.Add($"Projecto : {_conn.Project.Name}");
+            report.Add($"Data     : {DateTime.Now:dd/MM/yyyy HH:mm:ss}");
+            report.Add(new string('═', 60));
+            report.Add("");
+            report.AddRange(lines);
+            File.WriteAllLines(file, report);
+            Console.WriteLine($"  Grafo guardado: {file}\n");
         }
 
         private static void PrintBlock(BlockInfo block)
@@ -472,7 +504,101 @@ namespace TiaTracker.UI
             }
         }
 
-        private void SaveBlocksReport(List<BlockInfo> blocks)
+        // ── Call Graph ────────────────────────────────────────────────────────
+
+        private static List<string> BuildCallGraphLines(
+            List<BlockInfo> blocks,
+            Dictionary<string, List<ProjectReader.CallEdge>> graph)
+        {
+            var lines    = new List<string>();
+            var blockMap = blocks
+                .GroupBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            var called = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in graph)
+                foreach (var e in kv.Value)
+                    called.Add(e.Name);
+
+            var roots = blocks
+                .Where(b => b.Type != "DB" && b.Type != "iDB" && (b.Type == "OB" || !called.Contains(b.Name)))
+                .OrderBy(b => b.Type == "OB" ? 0 : 1)
+                .ThenBy(b => b.Number);
+
+            foreach (var root in roots)
+            {
+                var rootMeta = $"  [{root.Type}{root.Number}]  {root.Name}  · {root.Language} · {root.Networks.Count} redes";
+                lines.Add(rootMeta);
+                AppendCallNode(root.Name, graph, blockMap, 1,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase), lines);
+                lines.Add("");
+            }
+
+            lines.Add("── Referência inversa ──");
+            lines.Add($"  {"Bloco",-35} {"Tipo",-8} {"Lang",-5} {"Redes",-6}  Chamado por");
+            lines.Add("  " + new string('─', 70));
+            foreach (var block in blocks.Where(b => b.Type != "OB").OrderBy(b => b.Type).ThenBy(b => b.Name))
+            {
+                var callers = graph
+                    .Where(kv => kv.Value.Any(c => string.Equals(c.Name, block.Name, StringComparison.OrdinalIgnoreCase)))
+                    .Select(kv =>
+                    {
+                        var inst = kv.Value.FirstOrDefault(c => string.Equals(c.Name, block.Name, StringComparison.OrdinalIgnoreCase))?.Instance;
+                        return inst != null ? $"{kv.Key} (via {inst})" : kv.Key;
+                    })
+                    .OrderBy(s => s).ToList();
+                if (callers.Count == 0) continue;
+                var num = $"{block.Type}{block.Number}";
+                lines.Add($"  {block.Name,-35} {num,-8} {block.Language,-5} {block.Networks.Count,-6}  ← {string.Join(", ", callers)}");
+            }
+
+            return lines;
+        }
+
+        private static void AppendCallNode(
+            string name,
+            Dictionary<string, List<ProjectReader.CallEdge>> graph,
+            Dictionary<string, BlockInfo> blockMap,
+            int depth,
+            HashSet<string> stack,
+            List<string> lines)
+        {
+            if (stack.Contains(name))
+            {
+                lines.Add($"{new string(' ', depth * 2)}↻ (recursão detectada)");
+                return;
+            }
+
+            if (!graph.TryGetValue(name, out var calls) || calls.Count == 0)
+            {
+                if (depth == 1) lines.Add("  (sem chamadas)");
+                return;
+            }
+
+            stack.Add(name);
+            foreach (var edge in calls)
+            {
+                blockMap.TryGetValue(edge.Name, out var cb);
+                var num   = cb != null ? $"{edge.Type}{cb.Number}" : edge.Type;
+                var lang  = cb != null ? $" · {cb.Language}" : "";
+                var nets  = cb != null ? $" · {cb.Networks.Count} redes" : "";
+                var inst  = edge.Instance != null ? $"  [iDB: {edge.Instance}]" : "";
+                lines.Add($"{new string(' ', depth * 2)}→ [{num,-6}]  {edge.Name}{lang}{nets}{inst}");
+                AppendCallNode(edge.Name, graph, blockMap, depth + 1, stack, lines);
+            }
+            stack.Remove(name);
+        }
+
+        private static void PrintCallGraph(List<string> graphLines)
+        {
+            Console.WriteLine("  GRAFO DE CHAMADAS");
+            Console.WriteLine(new string('═', 60));
+            foreach (var line in graphLines)
+                Console.WriteLine(string.IsNullOrEmpty(line) ? "" : $"  {line}");
+            Console.WriteLine();
+        }
+
+        private void SaveBlocksReport(List<BlockInfo> blocks, List<string> callGraphLines)
         {
             var dir  = _snapshots.GetReportDir();
             Directory.CreateDirectory(dir);
@@ -508,6 +634,13 @@ namespace TiaTracker.UI
             }
 
             lines.Add($"\nTotal: {blocks.Count} blocos");
+
+            lines.Add("");
+            lines.Add(new string('═', 60));
+            lines.Add("GRAFO DE CHAMADAS");
+            lines.Add(new string('═', 60));
+            lines.AddRange(callGraphLines);
+
             File.WriteAllLines(file, lines);
             Console.WriteLine($"  Relatório guardado: {file}\n");
         }

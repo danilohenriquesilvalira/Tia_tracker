@@ -96,6 +96,13 @@ namespace TiaTracker.Core.FbdParsers
                 var neg = FbdContext.GetNegatedPorts(part);
                 string Inp(string p) => ctx.Inp(uid, p, neg, 0);
 
+                // Condição EN — se conectada a uma variável real (não PowerRail nem OpenCon)
+                string enCond = "";
+                if (ctx.WireFrom.TryGetValue((uid, "en"), out var enSrc) &&
+                    enSrc.uid != "PWR" && enSrc.uid != "OPEN")
+                    enCond = ctx.ResolveNode(enSrc.uid, enSrc.port, 0);
+                string En(string line) => string.IsNullOrEmpty(enCond) ? line : $"IF {enCond} THEN {line}";
+
                 switch (name)
                 {
                     // ── Move: out1..outN → var := in ─────────────────────────────────
@@ -109,7 +116,7 @@ namespace TiaTracker.Core.FbdParsers
                             foreach (var dst in dsts)
                             {
                                 if (!ctx.AccessMap.ContainsKey(dst.uid)) continue;
-                                result.Add($"{ctx.ResolveDestination(dst.uid, dst.port)} := {Inp("in")}");
+                                result.Add(En($"{ctx.ResolveDestination(dst.uid, dst.port)} := {Inp("in")}"));
                             }
                         }
                         break;
@@ -123,7 +130,7 @@ namespace TiaTracker.Core.FbdParsers
                         {
                             if (!ctx.AccessMap.ContainsKey(dst.uid)) continue;
                             var destVar = ctx.ResolveDestination(dst.uid, dst.port);
-                            result.Add($"MOVE_BLK(IN:={Inp("in")}, COUNT:={Inp("count")}, OUT:={destVar})");
+                            result.Add(En($"MOVE_BLK(IN:={Inp("in")}, COUNT:={Inp("count")}, OUT:={destVar})"));
                         }
                         break;
                     }
@@ -136,7 +143,7 @@ namespace TiaTracker.Core.FbdParsers
                         {
                             if (!ctx.AccessMap.ContainsKey(dst.uid)) continue;
                             var destVar = ctx.ResolveDestination(dst.uid, dst.port);
-                            result.Add($"UMOVE_BLK(IN:={Inp("in")}, COUNT:={Inp("count")}, OUT:={destVar})");
+                            result.Add(En($"UMOVE_BLK(IN:={Inp("in")}, COUNT:={Inp("count")}, OUT:={destVar})"));
                         }
                         break;
                     }
@@ -144,7 +151,6 @@ namespace TiaTracker.Core.FbdParsers
                     // ── MOVE_BLK_VARIANT: ret := MOVE_BLK_VARIANT(..., DEST:=dst) ────
                     case "MOVE_BLK_VARIANT":
                     {
-                        // Resolve DEST output (destination array)
                         string destParam = "?";
                         if (ctx.WireTo.TryGetValue((uid, "DEST"), out var destDsts))
                             foreach (var dst in destDsts)
@@ -153,11 +159,10 @@ namespace TiaTracker.Core.FbdParsers
 
                         var callExpr = $"MOVE_BLK_VARIANT(SRC:={Inp("SRC")}, COUNT:={Inp("COUNT")}, SRC_INDEX:={Inp("SRC_INDEX")}, DEST_INDEX:={Inp("DEST_INDEX")}, DEST:={destParam})";
 
-                        // Ret_Val → variable
                         if (ctx.WireTo.TryGetValue((uid, "Ret_Val"), out var retDsts))
                             foreach (var dst in retDsts)
                                 if (ctx.AccessMap.ContainsKey(dst.uid))
-                                    result.Add($"{ctx.ResolveDestination(dst.uid, dst.port)} := {callExpr}");
+                                    result.Add(En($"{ctx.ResolveDestination(dst.uid, dst.port)} := {callExpr}"));
                         break;
                     }
 
@@ -175,7 +180,7 @@ namespace TiaTracker.Core.FbdParsers
                         if (ctx.WireTo.TryGetValue((uid, "Ret_Val"), out var retDsts))
                             foreach (var dst in retDsts)
                                 if (ctx.AccessMap.ContainsKey(dst.uid))
-                                    result.Add($"{ctx.ResolveDestination(dst.uid, dst.port)} := {callExpr}");
+                                    result.Add(En($"{ctx.ResolveDestination(dst.uid, dst.port)} := {callExpr}"));
                         break;
                     }
 
@@ -193,7 +198,7 @@ namespace TiaTracker.Core.FbdParsers
                         if (ctx.WireTo.TryGetValue((uid, "Ret_Val"), out var retDsts))
                             foreach (var dst in retDsts)
                                 if (ctx.AccessMap.ContainsKey(dst.uid))
-                                    result.Add($"{ctx.ResolveDestination(dst.uid, dst.port)} := {callExpr}");
+                                    result.Add(En($"{ctx.ResolveDestination(dst.uid, dst.port)} := {callExpr}"));
                         break;
                     }
 
@@ -207,7 +212,7 @@ namespace TiaTracker.Core.FbdParsers
                         {
                             if (!ctx.AccessMap.ContainsKey(dst.uid)) continue;
                             var destVar = ctx.ResolveDestination(dst.uid, dst.port);
-                            result.Add($"{scl}(IN:={Inp("in")}, COUNT:={Inp("count")}, OUT:={destVar})");
+                            result.Add(En($"{scl}(IN:={Inp("in")}, COUNT:={Inp("count")}, OUT:={destVar})"));
                         }
                         break;
                     }
@@ -218,7 +223,7 @@ namespace TiaTracker.Core.FbdParsers
                         foreach (var dst in dsts)
                         {
                             if (!ctx.AccessMap.ContainsKey(dst.uid)) continue;
-                            result.Add($"{ctx.ResolveDestination(dst.uid, dst.port)} := SWAP({Inp("in")})");
+                            result.Add(En($"{ctx.ResolveDestination(dst.uid, dst.port)} := SWAP({Inp("in")})"));
                         }
                         break;
                     }

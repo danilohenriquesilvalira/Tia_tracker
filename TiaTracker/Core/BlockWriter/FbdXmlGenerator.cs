@@ -246,6 +246,8 @@ namespace TiaTracker.Core.BlockWriter
                 $"<TemplateValue Name=\"Card\" Type=\"Cardinality\">1</TemplateValue>"));
             parts.Add(AccessLocal(inUid,  inst.Param1,  "                  "));
             parts.Add(AccessLocal(outUid, inst.OutVar1, "                  "));
+            if (!string.IsNullOrWhiteSpace(inst.EnableSignal))
+                parts.Add(AccessLocal(enUid, inst.EnableSignal, "                  "));
 
             wires.Add(WireEnPwr(wUid1, partUid, enUid, inst.EnableSignal, "                  "));
             wires.Add(WireIn(wUid2,  inUid,  partUid, "in",   "                  "));
@@ -269,8 +271,8 @@ namespace TiaTracker.Core.BlockWriter
             parts.Add(AccessLocal(inAcc,  inst.Param1,  "                  "));
             parts.Add(AccessLocal(outAcc, inst.OutVar1, "                  "));
 
-            wires.Add(WireIn(wUid1,  inAcc,  partUid, "in",  "                  "));
-            wires.Add(WireOut(wUid2, partUid, "out", outAcc, "                  "));
+            wires.Add(WireIn(wUid1,  inAcc,  partUid, "in",       "                  "));
+            wires.Add(WireOut(wUid2, partUid, "operand", outAcc, "                  "));
         }
 
         // ────────────────────────────────────────────────────────────────────
@@ -297,6 +299,8 @@ namespace TiaTracker.Core.BlockWriter
             parts.Add(AccessLocal(in1Uid, inst.Param1, "                  "));
             parts.Add(AccessLocal(in2Uid, inst.Param2, "                  "));
             parts.Add(AccessLocal(outUid, inst.OutVar1, "                  "));
+            if (!string.IsNullOrWhiteSpace(inst.EnableSignal))
+                parts.Add(AccessLocal(enUid, inst.EnableSignal, "                  "));
 
             wires.Add(WireEnPwr(wUid1, partUid, enUid, inst.EnableSignal, "                  "));
             wires.Add(WireIn(wUid2, in1Uid, partUid, "in1", "                  "));
@@ -330,6 +334,8 @@ namespace TiaTracker.Core.BlockWriter
                 $"<TemplateValue Name=\"SrcType\" Type=\"Type\">{Esc(srcType)}</TemplateValue>"));
             parts.Add(AccessLocal(inUid,  inst.Param1,  "                  "));
             parts.Add(AccessLocal(outUid, inst.OutVar1, "                  "));
+            if (!string.IsNullOrWhiteSpace(inst.EnableSignal))
+                parts.Add(AccessLocal(enUid, inst.EnableSignal, "                  "));
 
             wires.Add(WireEnPwr(wUid1, partUid, enUid, inst.EnableSignal, "                  "));
             wires.Add(WireIn(wUid2,  inUid,  partUid, "in",  "                  "));
@@ -352,6 +358,8 @@ namespace TiaTracker.Core.BlockWriter
             parts.Add(Part(name, partUid, "                  ",
                 $"<TemplateValue Name=\"DestType\" Type=\"Type\">{Esc(dataType)}</TemplateValue>"));
             parts.Add(AccessLocal(opUid, inst.Param1, "                  "));
+            if (!string.IsNullOrWhiteSpace(inst.EnableSignal))
+                parts.Add(AccessLocal(enUid, inst.EnableSignal, "                  "));
 
             wires.Add(WireEnPwr(wUid1, partUid, enUid, inst.EnableSignal, "                  "));
             wires.Add(WireIn(wUid2, opUid, partUid, "operand", "                  "));
@@ -378,6 +386,8 @@ namespace TiaTracker.Core.BlockWriter
                 $"<TemplateValue Name=\"SrcType\" Type=\"Type\">{Esc(srcType)}</TemplateValue>"));
             parts.Add(AccessLocal(in1Uid, inst.Param1,  "                  "));
             parts.Add(AccessLocal(in2Uid, inst.Param2,  "                  "));
+            if (!string.IsNullOrWhiteSpace(inst.EnableSignal))
+                parts.Add(AccessLocal(enUid, inst.EnableSignal, "                  "));
 
             // Saída do comparador → Coil (OutVar1) ou outra instrução
             if (!string.IsNullOrWhiteSpace(inst.OutVar1))
@@ -396,7 +406,7 @@ namespace TiaTracker.Core.BlockWriter
                 wires.Add(WireIn(wUid3, in2Uid, partUid, "in2", "                  "));
                 // out do comparador → in do coil
                 wires.Add(Part2Part(wUid4, partUid, "out", coilUid, "in", "                  "));
-                wires.Add(WireOut(wCoil1, coilUid, "out", coilAcc, "                  "));
+                wires.Add(WireOut(wCoil1, coilUid, "operand", coilAcc, "                  "));
             }
             else
             {
@@ -459,7 +469,7 @@ namespace TiaTracker.Core.BlockWriter
                 parts.Add(Part("Coil", coilUid, "                  "));
                 parts.Add(AccessLocal(coilAcc, inst.OutVar1, "                  "));
                 wires.Add(Part2Part(wC1, partUid, "Q", coilUid, "in", "                  "));
-                wires.Add(WireOut(wC2, coilUid, "out", coilAcc, "                  "));
+                wires.Add(WireOut(wC2, coilUid, "operand", coilAcc, "                  "));
             }
 
             // ET → IdentCon se OutVar2 definido
@@ -525,7 +535,7 @@ namespace TiaTracker.Core.BlockWriter
                 parts.Add(Part("Coil", coilUid, "                  "));
                 parts.Add(AccessLocal(coilAcc, inst.OutVar1, "                  "));
                 wires.Add(Part2Part(wC1, partUid, "Q", coilUid, "in", "                  "));
-                wires.Add(WireOut(wC2, coilUid, "out", coilAcc, "                  "));
+                wires.Add(WireOut(wC2, coilUid, "operand", coilAcc, "                  "));
             }
 
             // CV → IdentCon
@@ -560,6 +570,8 @@ namespace TiaTracker.Core.BlockWriter
                 $"<TemplateValue Name=\"DestType\" Type=\"Type\">{Esc(destType)}</TemplateValue>"));
             parts.Add(AccessLocal(inUid,  inst.Param1,  "                  "));
             parts.Add(AccessLocal(outUid, inst.OutVar1, "                  "));
+            if (!string.IsNullOrWhiteSpace(inst.EnableSignal))
+                parts.Add(AccessLocal(enUid, inst.EnableSignal, "                  "));
 
             wires.Add(WireEnPwr(wUid1, partUid, enUid, inst.EnableSignal, "                  "));
             wires.Add(WireIn(wUid2,  inUid,  partUid, "in",  "                  "));
@@ -587,6 +599,8 @@ namespace TiaTracker.Core.BlockWriter
             parts.Add(AccessLocal(in1Uid, inst.Param1,  "                  "));
             parts.Add(AccessLocal(in2Uid, inst.Param2,  "                  "));
             parts.Add(AccessLocal(outUid, inst.OutVar1, "                  "));
+            if (!string.IsNullOrWhiteSpace(inst.EnableSignal))
+                parts.Add(AccessLocal(enUid, inst.EnableSignal, "                  "));
 
             wires.Add(WireEnPwr(wUid1, partUid, enUid, inst.EnableSignal, "                  "));
             wires.Add(WireIn(wUid2, in1Uid, partUid, "in1", "                  "));
@@ -615,6 +629,8 @@ namespace TiaTracker.Core.BlockWriter
             parts.Add(AccessLocal(inUid,  inst.Param1,  "                  "));
             parts.Add(AccessLocal(cntUid, inst.Param2,  "                  "));
             parts.Add(AccessLocal(outUid, inst.OutVar1, "                  "));
+            if (!string.IsNullOrWhiteSpace(inst.EnableSignal))
+                parts.Add(AccessLocal(enUid, inst.EnableSignal, "                  "));
 
             wires.Add(WireEnPwr(wUid1, partUid, enUid, inst.EnableSignal, "                  "));
             wires.Add(WireIn(wUid2, inUid,  partUid, "in",    "                  "));
@@ -627,7 +643,7 @@ namespace TiaTracker.Core.BlockWriter
         static string Part(string name, int partUid, string indent, params string[] children)
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"{indent}<Part Name=\"{name}\" UId=\"{partUid}\">");
+            sb.AppendLine($"{indent}<Part Name=\"{name}\" Version=\"1.0\" UId=\"{partUid}\">");
             foreach (var c in children)
                 sb.AppendLine($"{indent}  {c}");
             sb.AppendLine($"{indent}</Part>");

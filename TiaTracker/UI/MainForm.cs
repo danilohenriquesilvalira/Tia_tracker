@@ -38,6 +38,10 @@ namespace TiaTracker.UI
         private List<BlockInfo>    _blocks    = new List<BlockInfo>();
         private List<TagTableInfo> _tagTables = new List<TagTableInfo>();
         private List<UdtInfo>      _udts      = new List<UdtInfo>();
+        private Dictionary<string, List<ProjectReader.CallEdge>> _callGraph = new Dictionary<string, List<ProjectReader.CallEdge>>();
+
+        // Tag especial para o nó de grafo na TreeView
+        private class CallGraphTag { public string Device; }
 
         // ── Win32: impede que o TIA Portal desforme a nossa janela ────────────
         const int  WM_WINDOWPOSCHANGING = 0x0046;
@@ -327,11 +331,18 @@ namespace TiaTracker.UI
             ctxExportXml.Click += (s, e) => ExportSelectedBlockXml();
             ctxMenu.Items.Add(ctxExportXml);
 
+            ctxMenu.Items.Add(new ToolStripSeparator());
+
+            var ctxExportDevMd = new ToolStripMenuItem("📤  Exportar este PLC para IA (Markdown)...") { ForeColor = Color.FromArgb(220, 180, 80) };
+            ctxExportDevMd.Click += (s, e) => ExportDeviceMd(_tree.SelectedNode?.Tag as string == "device" ? _tree.SelectedNode?.Text?.Trim() : null);
+            ctxMenu.Items.Add(ctxExportDevMd);
+
             _tree.ContextMenuStrip = ctxMenu;
             ctxMenu.Opening += (s, e) =>
             {
                 var node = _tree.SelectedNode;
-                ctxExportXml.Enabled = node?.Tag is BlockInfo b && !string.IsNullOrEmpty(b.RawXml);
+                ctxExportXml.Enabled    = node?.Tag is BlockInfo b && !string.IsNullOrEmpty(b.RawXml);
+                ctxExportDevMd.Enabled  = node?.Tag as string == "device";
             };
 
             outerSplit.Panel1.Controls.Add(_tree);
@@ -710,7 +721,8 @@ namespace TiaTracker.UI
                     var reader = new ProjectReader(_conn.Project);
 
                     SetStatus("A ler blocos  (OB / FB / FC / DB)...", Color.Silver);
-                    _blocks = reader.ReadAllBlocks();
+                    _blocks    = reader.ReadAllBlocks();
+                    _callGraph = ProjectReader.BuildCallGraph(_blocks);
                     SetProgress(55);
 
                     SetStatus("A ler Tag Tables...", Color.Silver);
@@ -819,6 +831,15 @@ namespace TiaTracker.UI
                             { ForeColor = C_UDT, Tag = udt });
                     devNode.Nodes.Add(grp);
                 }
+
+                // Grafo de chamadas
+                var cgNode = new TreeNode("  ⬡  Grafo de Chamadas")
+                {
+                    ForeColor = C_GOLD,
+                    NodeFont  = new Font("Segoe UI", 9f, FontStyle.Bold),
+                    Tag       = new CallGraphTag { Device = dev }
+                };
+                devNode.Nodes.Add(cgNode);
 
                 devNode.Expand();
                 _tree.Nodes.Add(devNode);
@@ -986,6 +1007,11 @@ namespace TiaTracker.UI
                     ShowDetailHeader($"[UDT]  {u.Name}", $"#{u.Number}  ·  {u.Members.Count} membros  ·  {u.Device}", C_UDT);
                     RenderUdt(u);
                     break;
+                case CallGraphTag cg:
+                    var devBlks = _blocks.Where(b => b.Device == cg.Device).ToList();
+                    ShowDetailHeader("Grafo de Chamadas", $"{cg.Device}  ·  {devBlks.Count} blocos", C_GOLD);
+                    RenderCallGraph(devBlks, _callGraph);
+                    break;
             }
         }
 
@@ -1036,6 +1062,102 @@ namespace TiaTracker.UI
             }
             else
                 DetailLine("\n  (sem redes — bloco vazio ou DB)", C_GROUP);
+        }
+
+        // ── Render: Call Graph ───────────────────────────────────────────────
+        private void RenderCallGraph(
+            List<BlockInfo> blocks,
+            Dictionary<string, List<ProjectReader.CallEdge>> graph)
+        {
+            // Usar TODOS os blocos do projeto para o mapa (não só do device)
+            var blockMap = _blocks
+                .GroupBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            var called = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in graph)
+                foreach (var e in kv.Value)
+                    called.Add(e.Name);
+
+            DetailLine("\n  HIERARQUIA DE CHAMADAS", C_GOLD, true, 11f);
+            DetailLine("  " + new string('─', 80), C_GROUP);
+
+            var roots = blocks
+                .Where(b => b.Type != "DB" && b.Type != "iDB" && (b.Type == "OB" || !called.Contains(b.Name)))
+                .OrderBy(b => b.Type == "OB" ? 0 : 1)
+                .ThenBy(b => b.Number);
+
+            foreach (var root in roots)
+            {
+                DetailLine("", C_TEXT);
+                var rootCol  = root.Type == "OB" ? C_OB : root.Type == "FB" ? C_FB : C_FC;
+                var rootMeta = $"  · {root.Language} · {root.Networks.Count} redes";
+                DetailLine($"  [{root.Type}{root.Number}]  {root.Name}", rootCol, true);
+                DetailLine($"         {rootMeta}", C_IFACE);
+                RenderCallNode(root.Name, graph, blockMap, 1,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            }
+
+            // Referência inversa
+            DetailLine("\n\n  REFERÊNCIA INVERSA", C_GOLD, true, 11f);
+            DetailLine("  " + new string('─', 80), C_GROUP);
+            DetailLine($"  {"Bloco",-35} {"Tipo",-8} {"Linguagem",-6} {"Redes",-6}  Chamado por", C_IFACE, true);
+            DetailLine("  " + new string('─', 80), C_GROUP);
+
+            var anyShown = false;
+            foreach (var block in blocks.Where(b => b.Type != "OB").OrderBy(b => b.Type).ThenBy(b => b.Name))
+            {
+                var callerEdges = graph
+                    .Where(kv => kv.Value.Any(c => string.Equals(c.Name, block.Name, StringComparison.OrdinalIgnoreCase)))
+                    .Select(kv =>
+                    {
+                        var inst = kv.Value.FirstOrDefault(c => string.Equals(c.Name, block.Name, StringComparison.OrdinalIgnoreCase))?.Instance;
+                        return inst != null ? $"{kv.Key} (via {inst})" : kv.Key;
+                    })
+                    .OrderBy(s => s)
+                    .ToList();
+
+                if (callerEdges.Count == 0) continue;
+                anyShown = true;
+                var col   = block.Type == "FB" ? C_FB : C_FC;
+                var num   = $"{block.Type}{block.Number}";
+                var nets  = block.Networks.Count.ToString();
+                DetailLine($"  {block.Name,-35} {num,-8} {block.Language,-6} {nets,-6}  ← {string.Join(", ", callerEdges)}", col);
+            }
+            if (!anyShown)
+                DetailLine("\n  (nenhuma chamada detectada)", C_GROUP);
+        }
+
+        private void RenderCallNode(
+            string name,
+            Dictionary<string, List<ProjectReader.CallEdge>> graph,
+            Dictionary<string, BlockInfo> blockMap,
+            int depth,
+            HashSet<string> stack)
+        {
+            if (depth > 8) return;
+            if (stack.Contains(name))
+            {
+                DetailLine($"{new string(' ', depth * 4 + 2)}↻ recursão detectada", C_ERR);
+                return;
+            }
+            if (!graph.TryGetValue(name, out var calls) || calls.Count == 0) return;
+
+            stack.Add(name);
+            foreach (var edge in calls)
+            {
+                blockMap.TryGetValue(edge.Name, out var cb);
+                var num    = cb != null ? $"{edge.Type}{cb.Number}" : edge.Type;
+                var col    = edge.Type == "OB" ? C_OB : edge.Type == "FB" ? C_FB :
+                             edge.Type == "FC" ? C_FC : C_DB;
+                var indent = new string(' ', depth * 4 + 2);
+                var lang   = cb != null ? $" · {cb.Language}" : "";
+                var nets   = cb != null ? $" · {cb.Networks.Count} redes" : "";
+                var inst   = edge.Instance != null ? $"  📦 {edge.Instance} [iDB]" : "";
+                DetailLine($"{indent}→ [{num,-6}]  {edge.Name}{lang}{nets}{inst}", col);
+                RenderCallNode(edge.Name, graph, blockMap, depth + 1, stack);
+            }
+            stack.Remove(name);
         }
 
         // ── Render: Tag Table ─────────────────────────────────────────────────
@@ -1303,7 +1425,84 @@ namespace TiaTracker.UI
                 sb.AppendLine();
             }
 
+            // ── Grafo de chamadas ──────────────────────────────────────────────
+            if (blocks.Count > 0)
+            {
+                sb.AppendLine("## Grafo de Chamadas");
+                sb.AppendLine();
+                sb.AppendLine("> Mostra quem chama quem. OBs são os pontos de entrada do programa (chamados automaticamente pelo SO do PLC).");
+                sb.AppendLine();
+
+                var cg       = ProjectReader.BuildCallGraph(blocks);
+                var blockMap = blocks
+                    .GroupBy(b => b.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+                var called   = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in cg)
+                    foreach (var e in kv.Value)
+                        called.Add(e.Name);
+
+                var roots = blocks
+                    .Where(b => b.Type != "DB" && b.Type != "iDB" && (b.Type == "OB" || !called.Contains(b.Name)))
+                    .OrderBy(b => b.Type == "OB" ? 0 : 1)
+                    .ThenBy(b => b.Number);
+
+                sb.AppendLine("```");
+                foreach (var root in roots)
+                {
+                    sb.AppendLine($"[{root.Type}{root.Number}]  {root.Name}");
+                    MdCallNode(sb, root.Name, cg, blockMap, 1, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                    sb.AppendLine();
+                }
+                sb.AppendLine("```");
+                sb.AppendLine();
+
+                // Referência inversa em tabela
+                sb.AppendLine("### Referência inversa");
+                sb.AppendLine();
+                sb.AppendLine("| Bloco | Tipo | Linguagem | Redes | Chamado por |");
+                sb.AppendLine("|-------|------|-----------|-------|-------------|");
+                foreach (var block in blocks.Where(b => b.Type != "OB").OrderBy(b => b.Name))
+                {
+                    var callers = cg
+                        .Where(kv => kv.Value.Any(c => string.Equals(c.Name, block.Name, StringComparison.OrdinalIgnoreCase)))
+                        .Select(kv =>
+                        {
+                            var inst = kv.Value.FirstOrDefault(c => string.Equals(c.Name, block.Name, StringComparison.OrdinalIgnoreCase))?.Instance;
+                            return inst != null ? $"{kv.Key} (via {inst})" : kv.Key;
+                        })
+                        .OrderBy(s => s).ToList();
+                    if (callers.Count == 0) continue;
+                    sb.AppendLine($"| `{block.Name}` | {block.Type}{block.Number} | {block.Language} | {block.Networks.Count} | {string.Join(", ", callers)} |");
+                }
+                sb.AppendLine();
+                sb.AppendLine("---");
+                sb.AppendLine();
+            }
+
             return sb.ToString();
+        }
+
+        private static void MdCallNode(
+            StringBuilder sb, string name,
+            Dictionary<string, List<ProjectReader.CallEdge>> graph,
+            Dictionary<string, BlockInfo> blockMap,
+            int depth, HashSet<string> stack)
+        {
+            if (depth > 8 || stack.Contains(name)) return;
+            if (!graph.TryGetValue(name, out var calls) || calls.Count == 0) return;
+            stack.Add(name);
+            foreach (var edge in calls)
+            {
+                blockMap.TryGetValue(edge.Name, out var cb);
+                var num  = cb != null ? $"{edge.Type}{cb.Number}" : edge.Type;
+                var lang = cb != null ? $" · {cb.Language}" : "";
+                var nets = cb != null ? $" · {cb.Networks.Count} redes" : "";
+                var inst = edge.Instance != null ? $"  [iDB: {edge.Instance}]" : "";
+                sb.AppendLine($"{new string(' ', depth * 2)}→ [{num}]  {edge.Name}{lang}{nets}{inst}");
+                MdCallNode(sb, edge.Name, graph, blockMap, depth + 1, stack);
+            }
+            stack.Remove(name);
         }
 
         private void MdBlock(StringBuilder sb, BlockInfo b)
@@ -1348,8 +1547,8 @@ namespace TiaTracker.UI
                 }
             }
 
-            // Networks
-            if (b.Networks.Count > 0)
+            // Networks — DBs/iDBs não repetem: a Interface já cobre a estrutura
+            if (b.Networks.Count > 0 && b.Type != "DB" && b.Type != "iDB")
             {
                 var codeHint = lang == "SCL"   ? "SCL (Structured Control Language — semelhante a Pascal/C)" :
                                lang == "LAD"   ? "LAD (Ladder Diagram — contactos e bobinas)" :
@@ -1413,6 +1612,28 @@ namespace TiaTracker.UI
         }
 
         private static string Esc(string s) => s?.Replace("|", "\\|") ?? "";
+
+        private void ExportDeviceMd(string deviceName)
+        {
+            if (string.IsNullOrEmpty(deviceName)) return;
+            var devBlocks    = _blocks.Where(b => b.Device == deviceName).ToList();
+            var devTagTables = _tagTables.Where(t => t.Device == deviceName).ToList();
+            var devUdts      = _udts.Where(u => u.Device == deviceName).ToList();
+            var md = BuildMarkdown(devBlocks, devTagTables, devUdts, _txtPath.Text);
+            var safeName = string.Concat(deviceName.Split(Path.GetInvalidFileNameChars()));
+            using var dlg = new SaveFileDialog
+            {
+                Title    = "Exportar PLC para IA",
+                Filter   = "Markdown (*.md)|*.md|Texto (*.txt)|*.txt",
+                FileName = $"DaniloTracker_IA_{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.md"
+            };
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                File.WriteAllText(dlg.FileName, md, Encoding.UTF8);
+                var lines = md.Count(c => c == '\n');
+                SetStatus($"Exportado: {Path.GetFileName(dlg.FileName)}  ({lines:N0} linhas)", C_OK);
+            }
+        }
 
         private void SaveMd()
         {

@@ -142,7 +142,43 @@ namespace TiaTracker.Core.FbdParsers
         /// <summary>Nome legível de um elemento Access (variável ou constante).</summary>
         internal string GetVarName(XElement acc)
         {
-            var sym = acc.Descendants().FirstOrDefault(e => e.Name.LocalName == "Symbol");
+            var scope = acc.Attribute("Scope")?.Value;
+
+            // Endereço absoluto Siemens: DB40.DBW0 / I0.0 / MW10 / QB0 etc.
+            if (scope == "Address")
+            {
+                var addr = acc.Elements().FirstOrDefault(e => e.Name.LocalName == "Address");
+                if (addr != null)
+                {
+                    var area    = addr.Attribute("Area")?.Value ?? "?";
+                    var type    = addr.Attribute("Type")?.Value ?? "";
+                    var block   = addr.Attribute("BlockNumber")?.Value ?? "";
+                    int bitOff  = int.TryParse(addr.Attribute("BitOffset")?.Value, out int b) ? b : 0;
+                    int byteOff = bitOff / 8;
+                    int bitIdx  = bitOff % 8;
+
+                    if (area == "DB")
+                        return type switch
+                        {
+                            "Bool"  => $"DB{block}.DBX{byteOff}.{bitIdx}",
+                            "Byte"  => $"DB{block}.DBB{byteOff}",
+                            "Word"  => $"DB{block}.DBW{byteOff}",
+                            "DWord" => $"DB{block}.DBD{byteOff}",
+                            _       => $"DB{block}.{byteOff}"
+                        };
+                    else
+                        return type switch
+                        {
+                            "Bool"  => $"{area}{byteOff}.{bitIdx}",
+                            "Byte"  => $"{area}B{byteOff}",
+                            "Word"  => $"{area}W{byteOff}",
+                            "DWord" => $"{area}D{byteOff}",
+                            _       => $"{area}{byteOff}"
+                        };
+                }
+            }
+
+            var sym = acc.Elements().FirstOrDefault(e => e.Name.LocalName == "Symbol");
             if (sym != null) return GetVarNameFromSymbol(sym);
 
             // Indexação de array
@@ -181,6 +217,25 @@ namespace TiaTracker.Core.FbdParsers
                             e.Value == "true");
                         if (lastWasComponent && sb.Length > 0) sb.Append('.');
                         sb.Append(hasQuotes ? $"\"{compName}\"" : compName);
+                        // Handle array index: <Component AccessModifier="Array"><Access ...>
+                        if (el.Attribute("AccessModifier")?.Value == "Array")
+                        {
+                            var idxParts = el.Elements()
+                                .Where(e => e.Name.LocalName == "Access")
+                                .Select(e => {
+                                    var s = e.Attribute("Scope")?.Value;
+                                    if (s == "LiteralConstant" || s == "TypedConstant")
+                                        return e.Descendants()
+                                            .FirstOrDefault(x => x.Name.LocalName == "ConstantValue")
+                                            ?.Value ?? "?";
+                                    var innerSym = e.Elements()
+                                        .FirstOrDefault(x => x.Name.LocalName == "Symbol");
+                                    return innerSym != null ? GetVarNameFromSymbol(innerSym) : "?";
+                                })
+                                .ToList();
+                            if (idxParts.Count > 0)
+                                sb.Append($"[{string.Join(",", idxParts)}]");
+                        }
                         lastWasComponent = true;
                         break;
                     case "Token":

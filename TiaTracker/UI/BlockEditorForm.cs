@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 using TiaTracker.Core;
@@ -7,11 +8,11 @@ using TiaTracker.Core.BlockWriter;
 namespace TiaTracker.UI
 {
     /// <summary>
-    /// Editor focado: criar FC/FB em SCL, criar DB, chamar na OB1.
+    /// Editor focado: criar FC/FB em FBD, criar DB, chamar na OB1.
+    /// Gera o mesmo XML FBD que o TIA Portal exporta — import garantido.
     /// </summary>
     public class BlockEditorForm : Form
     {
-        // ── Theme ────────────────────────────────────────────────────────────
         static readonly Color BG     = Color.FromArgb( 30,  30,  30);
         static readonly Color PANEL  = Color.FromArgb( 37,  37,  38);
         static readonly Color C_TEXT = Color.FromArgb(212, 212, 212);
@@ -19,388 +20,317 @@ namespace TiaTracker.UI
         static readonly Color C_ERR  = Color.FromArgb(200,  60,  60);
         static readonly Color C_BLUE = Color.FromArgb(  0, 120, 212);
         static readonly Color C_PURP = Color.FromArgb( 90,  50, 140);
-        static readonly Color C_GOLD = Color.FromArgb(180, 140,  50);
-        static readonly Color C_GRAY = Color.FromArgb( 60,  60,  65);
+        static readonly Color C_GOLD = Color.FromArgb(170, 130,  40);
         static readonly Color BORDER = Color.FromArgb( 60,  60,  60);
 
-        // ── Controls ─────────────────────────────────────────────────────────
-        private Panel       _leftPanel;
-        private Panel       _rightPanel;
-        private Label       _lblTitle;
-        private TextBox     _txtName;
-        private TextBox     _txtNumber;
-        private ComboBox    _cmbFbRef;       // DB: referência ao FB
-        private TextBox     _txtFbNumber;   // DB: número do FB
-        private RichTextBox _rtbCode;        // editor SCL
-        private Label       _lblStatus;
-        private Button      _btnExecute;
-        private Panel       _pnlDbOptions;
-        private RadioButton _rdoInstanceDB, _rdoGlobalDB;
+        static readonly string[] InstrTypes =
+        {
+            "Move","Coil","SCoil","RCoil",
+            "Add","Sub","Mul","Div","Mod","Neg","Abs","Inc","Dec",
+            "Eq","Ne","Gt","Lt","Ge","Le",
+            "TON","TOF","TP","TONR","CTU","CTD",
+            "Convert","AND","OR","MoveBlockI","MoveBlockU",
+        };
 
-        private enum Mode { CreateFC, CreateFB, CreateDB, CallOB1 }
-        private Mode _mode = Mode.CreateFC;
+        static readonly string[] DataTypes =
+        {
+            "Bool","Byte","Word","DWord","Int","DInt","UInt","UDInt",
+            "Real","LReal","Time","String","Char",
+        };
+
+        // ── controls ─────────────────────────────────────────────────────────
+        private enum Mode { FC, FB, DB, Call }
+        private Mode          _mode = Mode.FC;
         private TiaConnection _conn;
+
+        private Label         _lblTitle;
+        private TextBox       _txtName, _txtNumber;
+
+        // FC/FB
+        private DataGridView  _gridVars;          // variáveis de interface
+        private DataGridView  _gridNets;          // redes (instruções)
+
+        // DB
+        private Panel         _pnlDb;
+        private RadioButton   _rdoInst, _rdoGlobal;
+        private TextBox       _txtFbName, _txtFbNum;
+
+        // Call
+        private Panel         _pnlCall;
+        private ComboBox      _cmbCallType;
+
+        private Label  _lblStatus;
+        private Button _btnOk;
 
         // ════════════════════════════════════════════════════════════════════
         public BlockEditorForm(TiaConnection conn)
         {
             _conn = conn;
-            BuildUI();
-            SetMode(Mode.CreateFC);
+            Build();
+            SetMode(Mode.FC);
         }
 
         // ════════════════════════════════════════════════════════════════════
-        void BuildUI()
+        void Build()
         {
-            Text          = "Danilo Tracker  —  Criar Blocos PLC";
-            Size          = new Size(1050, 680);
-            MinimumSize   = new Size(800, 500);
+            Text          = "Danilo Tracker  —  Criar Blocos";
+            Size          = new Size(1000, 660);
+            MinimumSize   = new Size(780, 500);
             StartPosition = FormStartPosition.CenterScreen;
             BackColor     = BG;
             ForeColor     = C_TEXT;
             Font          = new Font("Segoe UI", 9f);
 
-            // ── Painel esquerdo: acções ──────────────────────────────────────
-            _leftPanel = new Panel
+            // ── Left: botões de modo ─────────────────────────────────────────
+            var left = new Panel { Width = 180, Dock = DockStyle.Left, BackColor = PANEL, Padding = new Padding(8,12,8,8) };
+
+            var lbl = new Label { Text = "TIPO DE BLOCO", Dock = DockStyle.Top, Height = 22,
+                ForeColor = Color.FromArgb(110,110,110), Font = new Font("Segoe UI", 7.5f, FontStyle.Bold) };
+
+            var bCall = ModeBtn("⚡  CALL na OB1",   C_OK,   Mode.Call);
+            var sep   = new Panel { Height = 1, Dock = DockStyle.Top, BackColor = BORDER };
+            var bDB   = ModeBtn("🗄  DB — Data Block", C_GOLD, Mode.DB);
+            var bFB   = ModeBtn("📦  FB — Func. Block",C_PURP, Mode.FB);
+            var bFC   = ModeBtn("⚙  FC — Function",   C_BLUE, Mode.FC);
+
+            left.Controls.Add(bCall); left.Controls.Add(sep);
+            left.Controls.Add(bDB);  left.Controls.Add(bFB);
+            left.Controls.Add(bFC);  left.Controls.Add(lbl);
+
+            // ── Right: editor ────────────────────────────────────────────────
+            var right = new Panel { Dock = DockStyle.Fill, BackColor = BG, Padding = new Padding(12,10,12,8) };
+
+            // título
+            _lblTitle = new Label { Dock = DockStyle.Top, Height = 30, Font = new Font("Segoe UI", 13f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
+
+            // nome + número
+            var fTop = new Panel { Dock = DockStyle.Top, Height = 36 };
+            fTop.Controls.Add(Lbl("Nome:",   0, 10));
+            _txtName   = DarkBox(52, 6, 220); fTop.Controls.Add(_txtName);
+            fTop.Controls.Add(Lbl("Nº:",   290, 10));
+            _txtNumber = DarkBox(310, 6, 65);  fTop.Controls.Add(_txtNumber);
+
+            // ── grids FC/FB ──────────────────────────────────────────────────
+            var lblVars = SectionLabel("VARIÁVEIS DE INTERFACE  (Nome | Tipo | Direção)");
+            _gridVars = MakeGrid(new DataGridViewColumn[]
             {
-                Width     = 190,
-                Dock      = DockStyle.Left,
-                BackColor = PANEL,
-                Padding   = new Padding(8, 12, 8, 8),
+                new DataGridViewTextBoxColumn { Name="VN", HeaderText="Nome",    FillWeight=35 },
+                MakeComboCol("VT","Tipo",    DataTypes,   25),
+                MakeComboCol("VD","Direção", new[]{"Input","Output","InOut","Static","Temp"}, 20),
+                new DataGridViewTextBoxColumn { Name="VC", HeaderText="Comentário", FillWeight=20 },
+            });
+            _gridVars.Height = 130;
+
+            var barVars = BtnBar(
+                SmBtn("+ Variável", () => _gridVars.Rows.Add("Var"+((_gridVars.Rows.Count)+1),"Bool","Input","")),
+                SmBtn("− Remover",  () => { foreach(DataGridViewRow r in _gridVars.SelectedRows) if(!r.IsNewRow) _gridVars.Rows.Remove(r); })
+            );
+
+            var lblNets = SectionLabel("REDES / INSTRUÇÕES  — uma instrução por rede");
+            _gridNets = MakeGrid(new DataGridViewColumn[]
+            {
+                new DataGridViewTextBoxColumn { Name="NT", HeaderText="Título rede", FillWeight=14 },
+                MakeComboCol("NI","Instrução", InstrTypes, 12),
+                new DataGridViewTextBoxColumn    { Name="N0", HeaderText="Enable/Instância", FillWeight=12 },
+                new DataGridViewTextBoxColumn    { Name="N1", HeaderText="Param1 (in/in1)", FillWeight=11 },
+                new DataGridViewTextBoxColumn    { Name="N2", HeaderText="Param2 (in2/PT)", FillWeight=11 },
+                new DataGridViewTextBoxColumn    { Name="N3", HeaderText="Param3 (Tipo)", FillWeight=10 },
+                new DataGridViewTextBoxColumn    { Name="N4", HeaderText="Param4 (DestType)", FillWeight=10 },
+                new DataGridViewTextBoxColumn    { Name="N5", HeaderText="Saída 1 (out/Q)",  FillWeight=11 },
+                new DataGridViewTextBoxColumn    { Name="N6", HeaderText="Saída 2 (ET/CV)",  FillWeight=10 },
+            });
+
+            var barNets = BtnBar(
+                SmBtn("+ Rede",    () => _gridNets.Rows.Add("","Move","","","","","","","")),
+                SmBtn("− Remover", () => { foreach(DataGridViewRow r in _gridNets.SelectedRows) if(!r.IsNewRow) _gridNets.Rows.Remove(r); }),
+                SmBtn("↑ Subir",   () => MoveRow(_gridNets, -1)),
+                SmBtn("↓ Descer",  () => MoveRow(_gridNets, +1))
+            );
+
+            // ── painel DB ────────────────────────────────────────────────────
+            _pnlDb = new Panel { Dock = DockStyle.Fill, BackColor = BG, Visible = false };
+
+            _rdoInst   = new RadioButton { Text = "DB de Instância (para um FB)", Location = new Point(0, 10),  AutoSize=true, Checked=true, ForeColor=C_TEXT };
+            _rdoGlobal = new RadioButton { Text = "DB Global (dados globais)",     Location = new Point(0, 36), AutoSize=true, ForeColor=C_TEXT };
+            _rdoInst.CheckedChanged += (s,e) => RefreshDbPanel();
+
+            _pnlDb.Controls.Add(_rdoInst); _pnlDb.Controls.Add(_rdoGlobal);
+            _pnlDb.Controls.Add(Lbl("FB (nome):",   0, 70));
+            _txtFbName = DarkBox(85, 66, 200); _pnlDb.Controls.Add(_txtFbName);
+            _pnlDb.Controls.Add(Lbl("Nº FB:", 300, 70));
+            _txtFbNum  = DarkBox(350, 66, 60); _pnlDb.Controls.Add(_txtFbNum);
+            _txtFbNum.Text = "1";
+
+            var hintDb = new Label { Text =
+                "DB de Instância: cria uma DB associada a um FB existente (ou que vais criar).\n"+
+                "DB Global: cria uma DB com dados globais (estrutura definida depois no TIA Portal).",
+                Location = new Point(0, 105), AutoSize=true, ForeColor=Color.FromArgb(110,110,110) };
+            _pnlDb.Controls.Add(hintDb);
+
+            // ── painel CALL ──────────────────────────────────────────────────
+            _pnlCall = new Panel { Dock = DockStyle.Fill, BackColor = BG, Visible = false };
+            _pnlCall.Controls.Add(Lbl("Tipo:", 0, 10));
+            _cmbCallType = new ComboBox { Location=new Point(45,7), Width=80, DropDownStyle=ComboBoxStyle.DropDownList,
+                BackColor=Color.FromArgb(45,45,48), ForeColor=C_TEXT };
+            _cmbCallType.Items.AddRange(new object[]{"FC","FB"});
+            _cmbCallType.SelectedIndex = 0;
+            _pnlCall.Controls.Add(_cmbCallType);
+            var hintCall = new Label { Text =
+                "Vai adicionar uma rede na OB1 que chama o bloco com o Nome e Número acima.\n"+
+                "O bloco já deve existir no TIA Portal (cria primeiro com FC ou FB acima).",
+                Location = new Point(0, 40), AutoSize=true, ForeColor=Color.FromArgb(110,110,110) };
+            _pnlCall.Controls.Add(hintCall);
+
+            // ── bottom bar ───────────────────────────────────────────────────
+            var bot = new Panel { Dock=DockStyle.Bottom, Height=44, BackColor=PANEL };
+            _lblStatus = new Label { Location=new Point(10,10), AutoSize=false, Width=560, Height=24,
+                ForeColor=Color.Silver, TextAlign=ContentAlignment.MiddleLeft };
+            _btnOk = new Button { Text="▶  Criar no TIA Portal", Location=new Point(850,7),
+                Size=new Size(135,30), BackColor=C_BLUE, ForeColor=Color.White,
+                FlatStyle=FlatStyle.Flat, Font=new Font("Segoe UI",9.5f,FontStyle.Bold), Cursor=Cursors.Hand };
+            _btnOk.Click += (s,e) => Execute();
+
+            var btnXml = new Button { Text="Ver XML", Location=new Point(580,7),
+                Size=new Size(70,30), BackColor=Color.FromArgb(50,50,55), ForeColor=C_TEXT,
+                FlatStyle=FlatStyle.Flat, Cursor=Cursors.Hand };
+            btnXml.Click += (s,e) => PreviewXml();
+
+            bot.Controls.AddRange(new Control[]{ _lblStatus, btnXml, _btnOk });
+
+            // ── montar right ─────────────────────────────────────────────────
+            // ordem inversa no Dock.Top
+            var fcfbPanel = new Panel { Dock=DockStyle.Fill, BackColor=BG };
+            fcfbPanel.Controls.Add(_gridNets);
+            fcfbPanel.Controls.Add(barNets);
+            fcfbPanel.Controls.Add(lblNets);
+            fcfbPanel.Controls.Add(_gridVars);
+            fcfbPanel.Controls.Add(barVars);
+            fcfbPanel.Controls.Add(lblVars);
+
+            var stack = new Panel { Dock=DockStyle.Fill, BackColor=BG };
+            stack.Controls.Add(fcfbPanel);
+            stack.Controls.Add(_pnlCall);
+            stack.Controls.Add(_pnlDb);
+
+            right.Controls.Add(stack);
+            right.Controls.Add(fTop);
+            right.Controls.Add(_lblTitle);
+
+            Controls.Add(right); Controls.Add(left); Controls.Add(bot);
+
+            // layout dinâmico dos grids
+            fcfbPanel.Resize += (s,e) =>
+            {
+                int w = fcfbPanel.Width - 4;
+                _gridVars.Width = w;
+                _gridNets.Width = w;
+                _gridNets.Height = fcfbPanel.Height - _gridVars.Height - 80;
             };
 
-            var lblActions = new Label
-            {
-                Text      = "O QUE CRIAR",
-                Dock      = DockStyle.Top,
-                Height    = 24,
-                ForeColor = Color.FromArgb(120, 120, 120),
-                Font      = new Font("Segoe UI", 8f, FontStyle.Bold),
-                TextAlign = ContentAlignment.MiddleLeft,
-            };
-
-            var btnFC    = ActionBtn("  FC  —  Function",            C_BLUE,  Mode.CreateFC);
-            var btnFB    = ActionBtn("  FB  —  Function Block",      C_PURP,  Mode.CreateFB);
-            var btnDB    = ActionBtn("  DB  —  Data Block",          C_GOLD,  Mode.CreateDB);
-            var btnCall  = ActionBtn("  CALL  —  Chamar na OB1",     C_OK,    Mode.CallOB1);
-
-            var sep = new Panel { Height = 1, Dock = DockStyle.Top, BackColor = BORDER, Margin = new Padding(0, 8, 0, 8) };
-
-            _leftPanel.Controls.Add(btnCall);
-            _leftPanel.Controls.Add(sep);
-            _leftPanel.Controls.Add(btnDB);
-            _leftPanel.Controls.Add(btnFB);
-            _leftPanel.Controls.Add(btnFC);
-            _leftPanel.Controls.Add(lblActions);
-
-            // ── Painel direito: editor ───────────────────────────────────────
-            _rightPanel = new Panel
-            {
-                Dock      = DockStyle.Fill,
-                BackColor = BG,
-                Padding   = new Padding(12, 10, 12, 10),
-            };
-
-            _lblTitle = new Label
-            {
-                Dock      = DockStyle.Top,
-                Height    = 32,
-                Font      = new Font("Segoe UI", 13f, FontStyle.Bold),
-                ForeColor = C_BLUE,
-                TextAlign = ContentAlignment.MiddleLeft,
-            };
-
-            // Campos nome + número
-            var fieldsPanel = new Panel { Dock = DockStyle.Top, Height = 38 };
-
-            var lblName = new Label { Text = "Nome:", Location = new Point(0, 10), AutoSize = true, ForeColor = Color.Silver };
-            _txtName = new TextBox
-            {
-                Location  = new Point(50, 7),
-                Width     = 220,
-                BackColor = Color.FromArgb(45, 45, 48),
-                ForeColor = C_TEXT,
-                BorderStyle = BorderStyle.FixedSingle,
-                Font      = new Font("Segoe UI", 10f),
-            };
-
-            var lblNum = new Label { Text = "Número:", Location = new Point(290, 10), AutoSize = true, ForeColor = Color.Silver };
-            _txtNumber = new TextBox
-            {
-                Location  = new Point(355, 7),
-                Width     = 70,
-                BackColor = Color.FromArgb(45, 45, 48),
-                ForeColor = C_TEXT,
-                BorderStyle = BorderStyle.FixedSingle,
-                Font      = new Font("Segoe UI", 10f),
-            };
-
-            fieldsPanel.Controls.AddRange(new Control[] { lblName, _txtName, lblNum, _txtNumber });
-
-            // Opções DB (instância vs global + referência ao FB)
-            _pnlDbOptions = new Panel { Dock = DockStyle.Top, Height = 70, Visible = false };
-
-            _rdoInstanceDB = new RadioButton { Text = "DB de Instância (para FB)", Location = new Point(0,  6), AutoSize = true, Checked = true, ForeColor = C_TEXT };
-            _rdoGlobalDB   = new RadioButton { Text = "DB Global (dados)",          Location = new Point(0, 28), AutoSize = true,                ForeColor = C_TEXT };
-            _rdoInstanceDB.CheckedChanged += (s, e) => RefreshDbOptions();
-
-            var lblFbRef   = new Label { Text = "FB:", Location = new Point(260, 8),  AutoSize = true, ForeColor = Color.Silver };
-            _cmbFbRef = new ComboBox
-            {
-                Location      = new Point(285, 4),
-                Width         = 200,
-                DropDownStyle = ComboBoxStyle.DropDown,
-                BackColor     = Color.FromArgb(45, 45, 48),
-                ForeColor     = C_TEXT,
-                Font          = new Font("Segoe UI", 9f),
-            };
-
-            var lblFbNum   = new Label { Text = "Nº FB:", Location = new Point(500, 8), AutoSize = true, ForeColor = Color.Silver };
-            _txtFbNumber = new TextBox
-            {
-                Location    = new Point(548, 5),
-                Width       = 60,
-                BackColor   = Color.FromArgb(45, 45, 48),
-                ForeColor   = C_TEXT,
-                BorderStyle = BorderStyle.FixedSingle,
-            };
-
-            _pnlDbOptions.Controls.AddRange(new Control[]
-                { _rdoInstanceDB, _rdoGlobalDB, lblFbRef, _cmbFbRef, lblFbNum, _txtFbNumber });
-
-            // Editor SCL
-            _rtbCode = new RichTextBox
-            {
-                Dock        = DockStyle.Fill,
-                BackColor   = Color.FromArgb(28, 28, 28),
-                ForeColor   = Color.FromArgb(200, 220, 200),
-                Font        = new Font("Cascadia Code", 10f),
-                BorderStyle = BorderStyle.None,
-                AcceptsTab  = true,
-                WordWrap    = false,
-                ScrollBars  = RichTextBoxScrollBars.Both,
-            };
-            _rtbCode.KeyDown += (s, e) =>
-            {
-                if (e.KeyCode == Keys.Tab) { e.SuppressKeyPress = true; _rtbCode.SelectedText = "    "; }
-            };
-
-            _rightPanel.Controls.Add(_rtbCode);
-            _rightPanel.Controls.Add(_pnlDbOptions);
-            _rightPanel.Controls.Add(fieldsPanel);
-            _rightPanel.Controls.Add(_lblTitle);
-
-            // ── Barra de baixo ───────────────────────────────────────────────
-            var bottomBar = new Panel
-            {
-                Dock      = DockStyle.Bottom,
-                Height    = 46,
-                BackColor = PANEL,
-                Padding   = new Padding(10, 8, 10, 8),
-            };
-
-            _lblStatus = new Label
-            {
-                AutoSize  = false,
-                Width     = 550,
-                Height    = 30,
-                Location  = new Point(10, 8),
-                ForeColor = Color.Silver,
-                TextAlign = ContentAlignment.MiddleLeft,
-            };
-
-            _btnExecute = new Button
-            {
-                Text      = "Executar",
-                Location  = new Point(900, 8),
-                Size      = new Size(130, 30),
-                BackColor = C_OK,
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font      = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-                Cursor    = Cursors.Hand,
-            };
-            _btnExecute.Click += (s, e) => Execute();
-
-            bottomBar.Controls.AddRange(new Control[] { _lblStatus, _btnExecute });
-
-            Controls.Add(_rightPanel);
-            Controls.Add(_leftPanel);
-            Controls.Add(bottomBar);
-
-            // Status inicial
-            bool connected = _conn?.Project != null;
-            if (!connected)
-                SetStatus("Sem ligação ao TIA Portal — conecta primeiro para poder importar.", Color.FromArgb(180, 140, 60));
+            if (_conn?.Project == null)
+                SetStatus("Sem ligação — conecta primeiro no ecrã principal para poder importar.", Color.FromArgb(180,140,50));
         }
 
-        // ════════════════════════════════════════════════════════════════════
-        // Mudar modo
         // ════════════════════════════════════════════════════════════════════
         void SetMode(Mode m)
         {
             _mode = m;
-
-            _pnlDbOptions.Visible = (m == Mode.CreateDB);
-            _rtbCode.Visible      = (m != Mode.CreateDB && m != Mode.CallOB1);
+            bool isFcFb = m == Mode.FC || m == Mode.FB;
+            _gridVars.Parent.Visible = isFcFb;
+            _pnlDb.Visible           = m == Mode.DB;
+            _pnlCall.Visible         = m == Mode.Call;
 
             switch (m)
             {
-                case Mode.CreateFC:
-                    _lblTitle.Text      = "Criar FC — Function (SCL)";
+                case Mode.FC:
+                    _lblTitle.Text = "Criar FC — Function";
                     _lblTitle.ForeColor = C_BLUE;
-                    _txtName.Text       = "FC_New";
-                    _txtNumber.Text     = "100";
-                    _rtbCode.Text       = SclTemplateFC();
-                    _btnExecute.Text    = "▶  Criar FC no TIA Portal";
-                    _btnExecute.BackColor = C_BLUE;
+                    _txtName.Text = "FC_New"; _txtNumber.Text = "100";
+                    _btnOk.Text = "▶  Criar FC"; _btnOk.BackColor = C_BLUE;
                     break;
-
-                case Mode.CreateFB:
-                    _lblTitle.Text      = "Criar FB — Function Block (SCL)";
+                case Mode.FB:
+                    _lblTitle.Text = "Criar FB — Function Block";
                     _lblTitle.ForeColor = C_PURP;
-                    _txtName.Text       = "FB_New";
-                    _txtNumber.Text     = "1";
-                    _rtbCode.Text       = SclTemplateFB();
-                    _btnExecute.Text    = "▶  Criar FB no TIA Portal";
-                    _btnExecute.BackColor = C_PURP;
+                    _txtName.Text = "FB_New"; _txtNumber.Text = "1";
+                    _btnOk.Text = "▶  Criar FB"; _btnOk.BackColor = C_PURP;
                     break;
-
-                case Mode.CreateDB:
-                    _lblTitle.Text      = "Criar DB — Data Block";
+                case Mode.DB:
+                    _lblTitle.Text = "Criar DB — Data Block";
                     _lblTitle.ForeColor = C_GOLD;
-                    _txtName.Text       = "DB_New";
-                    _txtNumber.Text     = "200";
-                    PopulateFbList();
-                    RefreshDbOptions();
-                    _btnExecute.Text    = "▶  Criar DB no TIA Portal";
-                    _btnExecute.BackColor = C_GOLD;
+                    _txtName.Text = "DB_New"; _txtNumber.Text = "200";
+                    _btnOk.Text = "▶  Criar DB"; _btnOk.BackColor = C_GOLD;
+                    RefreshDbPanel();
                     break;
-
-                case Mode.CallOB1:
-                    _lblTitle.Text      = "Adicionar CALL na OB1";
+                case Mode.Call:
+                    _lblTitle.Text = "Adicionar CALL na OB1";
                     _lblTitle.ForeColor = C_OK;
-                    _txtName.Text       = "FC_New";
-                    _txtNumber.Text     = "100";
-                    _rtbCode.Visible    = false;
-                    _btnExecute.Text    = "▶  Adicionar CALL na OB1";
-                    _btnExecute.BackColor = C_OK;
-                    SetStatus("Preenche o Nome e Número do bloco a chamar.", Color.Silver);
+                    _txtName.Text = "FC_New"; _txtNumber.Text = "100";
+                    _btnOk.Text = "▶  Adicionar CALL"; _btnOk.BackColor = C_OK;
                     break;
             }
         }
 
-        void RefreshDbOptions()
+        void RefreshDbPanel()
         {
-            bool isInstance = _rdoInstanceDB.Checked;
-            _cmbFbRef.Visible   = isInstance;
-            _txtFbNumber.Visible = isInstance;
-            foreach (Control c in _pnlDbOptions.Controls)
-                if (c is Label lbl && (lbl.Text == "FB:" || lbl.Text == "Nº FB:"))
-                    lbl.Visible = isInstance;
-        }
-
-        void PopulateFbList()
-        {
-            _cmbFbRef.Items.Clear();
-            _cmbFbRef.Items.Add("(escreve o nome do FB)");
-            _cmbFbRef.SelectedIndex = 0;
-            _txtFbNumber.Text = "1";
+            bool isInst = _rdoInst.Checked;
+            _txtFbName.Visible = isInst; _txtFbNum.Visible = isInst;
+            foreach (Control c in _pnlDb.Controls)
+                if (c is Label l && (l.Text=="FB (nome):" || l.Text=="Nº FB:"))
+                    l.Visible = isInst;
         }
 
         // ════════════════════════════════════════════════════════════════════
-        // Templates SCL
-        // ════════════════════════════════════════════════════════════════════
-        static string SclTemplateFC() =>
-@"// ──────────────────────────────────────────────────────────────
-// FC gerada pelo Danilo Tracker
-// ──────────────────────────────────────────────────────────────
+        void PreviewXml()
+        {
+            string name = _txtName.Text.Trim();
+            if (!int.TryParse(_txtNumber.Text.Trim(), out int num)) num = 0;
+            string xml = null;
+            try
+            {
+                if (_mode == Mode.FC || _mode == Mode.FB)
+                {
+                    var def = BuildDefinition(string.IsNullOrWhiteSpace(name) ? "Preview" : name, num, _mode == Mode.FB);
+                    xml = FbdXmlGenerator.Generate(def);
+                }
+                else if (_mode == Mode.DB)
+                {
+                    bool isInst = _rdoInst.Checked;
+                    if (isInst)
+                        xml = SclBlockXmlGenerator.GenerateInstanceDB(name, num, _txtFbName.Text.Trim(),
+                              int.TryParse(_txtFbNum.Text, out int fn) ? fn : 1);
+                    else
+                        xml = SclBlockXmlGenerator.GenerateGlobalDB(name, num);
+                }
+                else
+                {
+                    SetStatus("Seleciona FC, FB ou DB para pré-visualizar o XML.", C_ERR); return;
+                }
+            }
+            catch (Exception ex) { SetStatus("Erro ao gerar XML: " + ex.Message, C_ERR); return; }
 
-// Declara as variáveis na interface (tab Interface do TIA Portal)
-// ou directamente aqui em SCL:
+            // Guardar no Desktop
+            string path = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                $"TiaTracker_{name}.xml");
+            System.IO.File.WriteAllText(path, xml, new System.Text.UTF8Encoding(true));
+            SetStatus($"XML guardado: {path}", C_OK);
+            System.Diagnostics.Process.Start("notepad.exe", path);
+        }
 
-VAR_INPUT
-    Enable : Bool;
-    Value  : Int;
-END_VAR
-
-VAR_OUTPUT
-    Result : Int;
-END_VAR
-
-VAR_TEMP
-    Tmp : Int;
-END_VAR
-
-BEGIN
-    IF Enable THEN
-        Tmp    := Value * 2;
-        Result := Tmp;
-    ELSE
-        Result := 0;
-    END_IF;
-END_FUNCTION
-";
-
-        static string SclTemplateFB() =>
-@"// ──────────────────────────────────────────────────────────────
-// FB gerada pelo Danilo Tracker
-// ──────────────────────────────────────────────────────────────
-
-VAR_INPUT
-    Enable : Bool;
-    Setpoint : Real;
-END_VAR
-
-VAR_OUTPUT
-    Running : Bool;
-    Fault   : Bool;
-END_VAR
-
-VAR
-    // Variáveis Static (persistentes entre chamadas)
-    Timer1 : TON;
-    Counter : Int;
-END_VAR
-
-VAR_TEMP
-    Tmp : Real;
-END_VAR
-
-BEGIN
-    // Lógica do bloco
-    Timer1(IN := Enable, PT := T#5S);
-
-    IF Timer1.Q THEN
-        Counter := Counter + 1;
-    END_IF;
-
-    Running := Enable AND NOT Fault;
-END_FUNCTION_BLOCK
-";
-
-        // ════════════════════════════════════════════════════════════════════
-        // Executar acção
         // ════════════════════════════════════════════════════════════════════
         void Execute()
         {
             if (_conn?.Project == null)
-            {
-                SetStatus("Sem ligação ao TIA Portal — conecta primeiro.", C_ERR);
-                return;
-            }
+            { SetStatus("Sem ligação ao TIA Portal — conecta primeiro.", C_ERR); return; }
 
-            string name   = _txtName.Text.Trim();
-            string numStr = _txtNumber.Text.Trim();
-
-            if (string.IsNullOrWhiteSpace(name))
-            { SetStatus("Preenche o Nome do bloco.", C_ERR); return; }
-
-            if (!int.TryParse(numStr, out int number))
+            string name = _txtName.Text.Trim();
+            if (!int.TryParse(_txtNumber.Text.Trim(), out int num))
             { SetStatus("Número inválido.", C_ERR); return; }
+            if (string.IsNullOrWhiteSpace(name))
+            { SetStatus("Preenche o Nome.", C_ERR); return; }
 
-            _btnExecute.Enabled = false;
-            SetStatus("A processar...", Color.Silver);
+            _btnOk.Enabled = false;
+            SetStatus("A gerar e importar...", Color.Silver);
 
             System.Threading.Tasks.Task.Run(() =>
             {
@@ -411,41 +341,34 @@ END_FUNCTION_BLOCK
 
                     switch (_mode)
                     {
-                        case Mode.CreateFC:
-                            xml = SclBlockXmlGenerator.GenerateFC(name, number, _rtbCode.Text);
+                        case Mode.FC:
+                        case Mode.FB:
+                            var def = BuildDefinition(name, num, _mode == Mode.FB);
+                            xml = FbdXmlGenerator.Generate(def);
                             importer.ImportBlock(xml);
-                            SetStatus($"FC '{name}' criada com sucesso!", C_OK);
+                            SetStatus($"'{name}' criado com sucesso no TIA Portal!", C_OK);
                             break;
 
-                        case Mode.CreateFB:
-                            xml = SclBlockXmlGenerator.GenerateFB(name, number, _rtbCode.Text);
-                            importer.ImportBlock(xml);
-                            SetStatus($"FB '{name}' criada com sucesso!", C_OK);
-                            break;
-
-                        case Mode.CreateDB:
-                            string fbName   = "";
-                            int    fbNumber = 0;
-                            bool   isInst   = false;
+                        case Mode.DB:
+                            bool isInst = false; string fbName=""; int fbNum=1;
                             Invoke((Action)(() =>
                             {
-                                isInst   = _rdoInstanceDB.Checked;
-                                fbName   = _cmbFbRef.Text.Trim();
-                                int.TryParse(_txtFbNumber.Text, out fbNumber);
+                                isInst = _rdoInst.Checked;
+                                fbName = _txtFbName.Text.Trim();
+                                int.TryParse(_txtFbNum.Text, out fbNum);
                             }));
-
                             if (isInst)
-                                xml = SclBlockXmlGenerator.GenerateInstanceDB(name, number, fbName, fbNumber);
+                                xml = SclBlockXmlGenerator.GenerateInstanceDB(name, num, fbName, fbNum);
                             else
-                                xml = SclBlockXmlGenerator.GenerateGlobalDB(name, number);
-
+                                xml = SclBlockXmlGenerator.GenerateGlobalDB(name, num);
                             importer.ImportBlock(xml);
                             SetStatus($"DB '{name}' criada com sucesso!", C_OK);
                             break;
 
-                        case Mode.CallOB1:
-                            string blockType = name.StartsWith("FB", StringComparison.OrdinalIgnoreCase) ? "FB" : "FC";
-                            importer.AddCallToOb1(name, blockType);
+                        case Mode.Call:
+                            string bType = "FC";
+                            Invoke((Action)(() => bType = _cmbCallType.SelectedItem?.ToString() ?? "FC"));
+                            importer.AddCallToOb1(name, bType);
                             SetStatus($"CALL '{name}' adicionado na OB1!", C_OK);
                             break;
                     }
@@ -454,44 +377,149 @@ END_FUNCTION_BLOCK
                 {
                     SetStatus($"Erro: {ex.Message}", C_ERR);
                 }
-                finally
-                {
-                    Invoke((Action)(() => _btnExecute.Enabled = true));
-                }
+                finally { Invoke((Action)(() => _btnOk.Enabled = true)); }
             });
         }
 
         // ════════════════════════════════════════════════════════════════════
-        // Helpers
+        // Constrói BlockDefinition a partir das grids
         // ════════════════════════════════════════════════════════════════════
-        void SetStatus(string msg, Color color)
+        BlockDefinition BuildDefinition(string name, int num, bool isFb)
         {
-            if (InvokeRequired) { Invoke((Action)(() => SetStatus(msg, color))); return; }
-            _lblStatus.Text      = msg;
-            _lblStatus.ForeColor = color;
+            var def = new BlockDefinition
+            {
+                BlockType = isFb ? PlcBlockType.FB : PlcBlockType.FC,
+                Name      = name,
+                Number    = num,
+            };
+
+            // variáveis
+            foreach (DataGridViewRow row in _gridVars.Rows)
+            {
+                var vname = row.Cells["VN"]?.Value?.ToString() ?? "";
+                if (string.IsNullOrWhiteSpace(vname)) continue;
+                var v = new InterfaceVar
+                {
+                    Name     = vname,
+                    DataType = row.Cells["VT"]?.Value?.ToString() ?? "Bool",
+                    Comment  = row.Cells["VC"]?.Value?.ToString() ?? "",
+                };
+                switch (row.Cells["VD"]?.Value?.ToString())
+                {
+                    case "Output": def.Outputs.Add(v); break;
+                    case "InOut":  def.InOuts.Add(v);  break;
+                    case "Static": def.Statics.Add(v); break;
+                    case "Temp":   def.Temps.Add(v);   break;
+                    default:       def.Inputs.Add(v);  break;
+                }
+            }
+
+            // redes
+            foreach (DataGridViewRow row in _gridNets.Rows)
+            {
+                var itype = row.Cells["NI"]?.Value?.ToString() ?? "";
+                if (string.IsNullOrWhiteSpace(itype)) continue;
+                var net = new NetworkDef { Title = row.Cells["NT"]?.Value?.ToString() ?? "" };
+                net.Instructions.Add(new InstructionDef
+                {
+                    InstructType = itype,
+                    EnableSignal = row.Cells["N0"]?.Value?.ToString() ?? "",
+                    Param1       = row.Cells["N1"]?.Value?.ToString() ?? "",
+                    Param2       = row.Cells["N2"]?.Value?.ToString() ?? "",
+                    Param3       = row.Cells["N3"]?.Value?.ToString() ?? "",
+                    Param4       = row.Cells["N4"]?.Value?.ToString() ?? "",
+                    OutVar1      = row.Cells["N5"]?.Value?.ToString() ?? "",
+                    OutVar2      = row.Cells["N6"]?.Value?.ToString() ?? "",
+                });
+                def.Networks.Add(net);
+            }
+
+            return def;
         }
 
-        Button ActionBtn(string text, Color color, Mode mode)
+        // ════════════════════════════════════════════════════════════════════
+        // Helpers UI
+        // ════════════════════════════════════════════════════════════════════
+        void SetStatus(string msg, Color c)
         {
-            var btn = new Button
-            {
-                Text      = text,
-                Dock      = DockStyle.Top,
-                Height    = 42,
-                BackColor = Color.FromArgb(45, 45, 50),
-                ForeColor = color,
-                FlatStyle = FlatStyle.Flat,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Font      = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-                Cursor    = Cursors.Hand,
-                Margin    = new Padding(0, 0, 0, 4),
-            };
-            btn.FlatAppearance.BorderColor = color;
-            btn.FlatAppearance.BorderSize  = 1;
-            btn.Click += (s, e) => SetMode(mode);
-            btn.MouseEnter += (s, e) => btn.BackColor = Color.FromArgb(55, 55, 65);
-            btn.MouseLeave += (s, e) => btn.BackColor = Color.FromArgb(45, 45, 50);
-            return btn;
+            if (InvokeRequired) { Invoke((Action)(() => SetStatus(msg, c))); return; }
+            _lblStatus.Text = msg; _lblStatus.ForeColor = c;
         }
+
+        static void MoveRow(DataGridView g, int delta)
+        {
+            int i = g.CurrentRow?.Index ?? -1;
+            int j = i + delta;
+            if (i < 0 || j < 0 || j >= g.Rows.Count) return;
+            var vals = new object[g.Columns.Count];
+            for (int k = 0; k < g.Columns.Count; k++) vals[k] = g.Rows[i].Cells[k].Value;
+            for (int k = 0; k < g.Columns.Count; k++) g.Rows[i].Cells[k].Value = g.Rows[j].Cells[k].Value;
+            for (int k = 0; k < g.Columns.Count; k++) g.Rows[j].Cells[k].Value = vals[k];
+            g.CurrentCell = g.Rows[j].Cells[0];
+        }
+
+        Button ModeBtn(string text, Color accent, Mode mode)
+        {
+            var b = new Button { Text=text, Dock=DockStyle.Top, Height=42,
+                BackColor=Color.FromArgb(44,44,50), ForeColor=accent,
+                FlatStyle=FlatStyle.Flat, TextAlign=ContentAlignment.MiddleLeft,
+                Font=new Font("Segoe UI",9.5f,FontStyle.Bold), Cursor=Cursors.Hand,
+                Margin=new Padding(0,0,0,3) };
+            b.FlatAppearance.BorderColor = accent; b.FlatAppearance.BorderSize = 1;
+            b.Click      += (s,e) => SetMode(mode);
+            b.MouseEnter += (s,e) => b.BackColor = Color.FromArgb(55,55,65);
+            b.MouseLeave += (s,e) => b.BackColor = Color.FromArgb(44,44,50);
+            return b;
+        }
+
+        static DataGridView MakeGrid(DataGridViewColumn[] cols)
+        {
+            var g = new DataGridView
+            {
+                Dock=DockStyle.Top, BackgroundColor=PANEL, ForeColor=C_TEXT,
+                GridColor=BORDER, BorderStyle=BorderStyle.None, AllowUserToAddRows=false,
+                SelectionMode=DataGridViewSelectionMode.FullRowSelect, RowHeadersVisible=false,
+                AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill,
+                ColumnHeadersDefaultCellStyle = { BackColor=Color.FromArgb(50,50,52), ForeColor=C_TEXT },
+                DefaultCellStyle = { BackColor=PANEL, ForeColor=C_TEXT, SelectionBackColor=Color.FromArgb(38,79,120) },
+            };
+            foreach (var c in cols) g.Columns.Add(c);
+            return g;
+        }
+
+        static DataGridViewComboBoxColumn MakeComboCol(string name, string header, string[] items, int weight)
+        {
+            return new DataGridViewComboBoxColumn
+            { Name=name, HeaderText=header, FillWeight=weight, DataSource=new List<string>(items), DisplayStyle=DataGridViewComboBoxDisplayStyle.ComboBox };
+        }
+
+        static Panel BtnBar(params Button[] btns)
+        {
+            var p = new Panel { Dock=DockStyle.Top, Height=26 };
+            int x = 0;
+            foreach (var b in btns) { b.Location = new Point(x, 2); x += b.Width + 4; p.Controls.Add(b); }
+            return p;
+        }
+
+        static Button SmBtn(string text, Action onClick, int w = 88)
+        {
+            var b = new Button { Text=text, Size=new Size(w,22), BackColor=Color.FromArgb(55,55,60),
+                ForeColor=C_TEXT, FlatStyle=FlatStyle.Flat, Cursor=Cursors.Hand };
+            b.Click += (s,e) => onClick();
+            return b;
+        }
+
+        static Label Lbl(string t, int x, int y) =>
+            new Label { Text=t, Location=new Point(x,y), AutoSize=true, ForeColor=Color.FromArgb(160,160,160) };
+
+        static Label SectionLabel(string t)
+        {
+            return new Label { Text=t, Dock=DockStyle.Top, Height=22, ForeColor=Color.FromArgb(120,120,140),
+                Font=new Font("Segoe UI",7.5f,FontStyle.Bold), TextAlign=ContentAlignment.MiddleLeft };
+        }
+
+        static TextBox DarkBox(int x, int y, int w) =>
+            new TextBox { Location=new Point(x,y), Width=w, BackColor=Color.FromArgb(45,45,48),
+                ForeColor=Color.FromArgb(212,212,212), BorderStyle=BorderStyle.FixedSingle };
     }
 }

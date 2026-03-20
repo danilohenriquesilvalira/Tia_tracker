@@ -33,18 +33,38 @@ namespace TiaTracker.Core.BlockWriter
             if (software == null)
                 throw new InvalidOperationException("Nenhum PLC software encontrado no projecto.");
 
+            // TIA Portal requires UTF-8 with BOM
+            var utf8Bom  = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
             var tempFile = Path.Combine(Path.GetTempPath(), $"TiaTracker_Import_{Guid.NewGuid():N}.xml");
+            bool success = false;
             try
             {
-                File.WriteAllText(tempFile, xml, Encoding.UTF8);
-                Console.WriteLine($"  A importar bloco...");
+                File.WriteAllText(tempFile, xml, utf8Bom);
+                Console.WriteLine($"  A importar bloco de: {tempFile}");
                 software.BlockGroup.Blocks.Import(new FileInfo(tempFile), ImportOptions.Override);
                 Console.WriteLine("  Bloco importado com sucesso!");
+                success = true;
                 return ExtractBlockName(xml);
+            }
+            catch (Exception ex)
+            {
+                // Build full inner-exception chain for diagnosis
+                var msg = new System.Text.StringBuilder(ex.Message);
+                var inner = ex.InnerException;
+                while (inner != null)
+                {
+                    msg.Append(" | ").Append(inner.Message);
+                    inner = inner.InnerException;
+                }
+                // Keep temp file so user can inspect the XML
+                if (!success)
+                    Console.WriteLine($"  XML guardado para inspecção: {tempFile}");
+                throw new Exception(msg.ToString() + $"\n[XML: {tempFile}]");
             }
             finally
             {
-                try { File.Delete(tempFile); } catch { }
+                if (success)
+                    try { File.Delete(tempFile); } catch { }
             }
         }
 
@@ -69,8 +89,10 @@ namespace TiaTracker.Core.BlockWriter
             }
 
             // Exportar OB1 actual
+            var utf8Bom    = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
             var tempExport = Path.Combine(Path.GetTempPath(), $"TiaTracker_OB1_Export_{Guid.NewGuid():N}.xml");
             var tempImport = Path.Combine(Path.GetTempPath(), $"TiaTracker_OB1_Import_{Guid.NewGuid():N}.xml");
+            bool success = false;
             try
             {
                 ob1.Export(new FileInfo(tempExport), ExportOptions.WithDefaults);
@@ -84,14 +106,23 @@ namespace TiaTracker.Core.BlockWriter
                     return;
                 }
 
-                File.WriteAllText(tempImport, updatedXml, Encoding.UTF8);
+                File.WriteAllText(tempImport, updatedXml, utf8Bom);
                 software.BlockGroup.Blocks.Import(new FileInfo(tempImport), ImportOptions.Override);
                 Console.WriteLine($"  Chamada de {blockName} adicionada ao OB1!");
+                success = true;
+            }
+            catch (Exception ex)
+            {
+                var msg = new System.Text.StringBuilder(ex.Message);
+                var inner = ex.InnerException;
+                while (inner != null) { msg.Append(" | ").Append(inner.Message); inner = inner.InnerException; }
+                Console.WriteLine($"  [CALL OB1] XML: {tempImport}");
+                throw new Exception(msg.ToString() + $"\n[XML: {tempImport}]");
             }
             finally
             {
                 try { File.Delete(tempExport); } catch { }
-                try { File.Delete(tempImport); } catch { }
+                if (success) try { File.Delete(tempImport); } catch { }
             }
         }
 

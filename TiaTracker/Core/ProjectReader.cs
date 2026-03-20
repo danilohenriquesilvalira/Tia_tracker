@@ -195,7 +195,7 @@ namespace TiaTracker.Core
                     var staticSec = iface.FirstOrDefault(s => s.Name == "Static");
                     if (staticSec != null && staticSec.Members.Count > 0)
                     {
-                        var net = new NetworkInfo { Index = 1, Title = "VariÃ¡veis", Language = "DB" };
+                        var net = new NetworkInfo { Index = 1, Title = "Variáveis", Language = "DB" };
                         foreach (var m in FlattenMembers(staticSec.Members, ""))
                             net.Lines.Add(m);
                         networks.Add(net);
@@ -700,6 +700,69 @@ namespace TiaTracker.Core
         }
 
         // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+        // ── Call Graph ────────────────────────────────────────────────────────
+
+        /// <summary>Aresta do grafo: um bloco que é chamado por outro.</summary>
+        public class CallEdge
+        {
+            public string Name;      // nome do bloco chamado, ex: "Bit_logic"
+            public string Type;      // tipo: FC, FB, OB, ...
+            public string Instance;  // instância iDB (só para FB), ex: "Bit_logic_DB"
+        }
+
+        /// <summary>
+        /// Constrói o grafo de chamadas a partir das linhas já parseadas.
+        /// Retorna: callerName → lista de CallEdge sem duplicatas.
+        /// </summary>
+        public static Dictionary<string, List<CallEdge>> BuildCallGraph(List<BlockInfo> blocks)
+        {
+            var graph = new Dictionary<string, List<CallEdge>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var block in blocks)
+            {
+                var calls = new List<CallEdge>();
+                var seen  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var net in block.Networks)
+                foreach (var line in net.Lines)
+                {
+                    var callIdx = line.IndexOf("CALL ", StringComparison.Ordinal);
+                    if (callIdx < 0) continue;
+
+                    var after  = line.Substring(callIdx + 5).Trim();
+                    var brOpen = after.IndexOf('[');
+                    if (brOpen < 0) continue;
+
+                    // Nome antes de '[': pode ser enriquecido "FC5 – Bit_logic" ou simples "Bit_logic"
+                    var rawName    = after.Substring(0, brOpen).Trim();
+                    var dash       = rawName.IndexOf('\u2013');  // en-dash inserido por EnrichCallReferences
+                    var calledName = dash >= 0 ? rawName.Substring(dash + 1).Trim() : rawName;
+
+                    var brClose    = after.IndexOf(']', brOpen);
+                    var calledType = brClose > brOpen
+                        ? after.Substring(brOpen + 1, brClose - brOpen - 1).Trim()
+                        : "?";
+
+                    // Instância do iDB: "instance: Bit_logic_DB" após o ']'
+                    string instance = null;
+                    if (brClose > 0)
+                    {
+                        var rest     = after.Substring(brClose + 1).Trim();
+                        var instIdx  = rest.IndexOf("instance:", StringComparison.OrdinalIgnoreCase);
+                        if (instIdx >= 0)
+                            instance = rest.Substring(instIdx + 9).Trim();
+                    }
+
+                    if (!string.IsNullOrEmpty(calledName) && seen.Add(calledName.ToUpperInvariant()))
+                        calls.Add(new CallEdge { Name = calledName, Type = calledType, Instance = instance });
+                }
+
+                graph[block.Name] = calls;
+            }
+
+            return graph;
+        }
 
         private static string GetBlockType(PlcBlock block)
         {
