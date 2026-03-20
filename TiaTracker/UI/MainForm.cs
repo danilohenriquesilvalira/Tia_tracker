@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -30,12 +31,38 @@ namespace TiaTracker.UI
 
         // ── State ─────────────────────────────────────────────────────────────
         private bool               _running;
+        private bool               _lockWindowPos;   // impede resize/move durante ligação ao TIA
         private string             _xmlResult;
         private string             _mdResult;
         private TiaConnection      _conn;
         private List<BlockInfo>    _blocks    = new List<BlockInfo>();
         private List<TagTableInfo> _tagTables = new List<TagTableInfo>();
         private List<UdtInfo>      _udts      = new List<UdtInfo>();
+
+        // ── Win32: impede que o TIA Portal desforme a nossa janela ────────────
+        const int  WM_WINDOWPOSCHANGING = 0x0046;
+        const uint SWP_NOSIZE           = 0x0001;
+        const uint SWP_NOMOVE           = 0x0002;
+        const uint SWP_NOZORDER         = 0x0004;
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct WINDOWPOS
+        {
+            public IntPtr hwnd, hwndInsertAfter;
+            public int    x, y, cx, cy;
+            public uint   flags;
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (_lockWindowPos && m.Msg == WM_WINDOWPOSCHANGING)
+            {
+                var pos = (WINDOWPOS)Marshal.PtrToStructure(m.LParam, typeof(WINDOWPOS));
+                pos.flags |= SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER;
+                Marshal.StructureToPtr(pos, m.LParam, false);
+            }
+            base.WndProc(ref m);
+        }
 
         // ── Theme — VS Code Dark+ ──────────────────────────────────────────────
         static readonly Color BG      = Color.FromArgb( 30,  30,  30);   // #1E1E1E
@@ -173,6 +200,7 @@ namespace TiaTracker.UI
             _btnRun     = MkBtn("▶  Conectar e Ler", 174, C_BLUE);
             _btnSaveXml = MkBtn("Salvar XML",        138, Color.FromArgb(60, 60, 60));
             _btnSaveMd  = MkBtn("Exportar para IA",  158, Color.FromArgb(60, 60, 60));
+            var btnEditor = MkBtn("✏  Criar Bloco",  148, Color.FromArgb(80, 50, 120));
 
             _btnRun.Font        = new Font("Segoe UI", 9.5f, FontStyle.Bold);
             _btnRun.Margin      = new Padding(4, 0, 4, 0);
@@ -184,12 +212,14 @@ namespace TiaTracker.UI
             _btnRun.Click     += async (s, e) => await RunAsync();
             _btnSaveXml.Click += (s, e) => SaveXml();
             _btnSaveMd.Click  += (s, e) => SaveMd();
+            btnEditor.Click   += (s, e) => new BlockEditorForm(_conn).Show();
 
             // hover nos botões
             AddHover(_btnBrowse,  Color.FromArgb(80, 80, 80),   Color.FromArgb(60, 60, 60));
             AddHover(_btnSaveXml, Color.FromArgb(80, 80, 80),   Color.FromArgb(60, 60, 60));
             AddHover(_btnSaveMd,  Color.FromArgb(80, 80, 80),   Color.FromArgb(60, 60, 60));
             AddHover(_btnRun,     Color.FromArgb(14, 99, 156),   C_BLUE);
+            AddHover(btnEditor,   Color.FromArgb(100, 60, 150),  Color.FromArgb(80, 50, 120));
 
             tbl.Controls.Add(lblPath,     0, 0);
             tbl.Controls.Add(_txtPath,    1, 0);
@@ -197,6 +227,7 @@ namespace TiaTracker.UI
             tbl.Controls.Add(_btnRun,     3, 0);
             tbl.Controls.Add(_btnSaveXml, 4, 0);
             tbl.Controls.Add(_btnSaveMd,  5, 0);
+            tbl.Controls.Add(btnEditor,   6, 0);
             toolbar.Controls.Add(tbl);
 
             _progress = new ProgressBar
@@ -651,11 +682,11 @@ namespace TiaTracker.UI
             SetStatus("A preparar...", Color.Silver);
             SetStats("");
 
-            // Guardar estado da janela antes de abrir o TIA Portal (que pode roubar foco e distorcer o layout)
-            var savedWindowState  = WindowState;
-            var savedBounds       = (WindowState == FormWindowState.Normal) ? Bounds : RestoreBounds;
-
             var path = _txtPath.Text.Trim();
+
+            // Bloquear resize/move da janela durante a ligação ao TIA Portal
+            // (o TIA Portal abre com UI e o auto-accept usa mouse_event, o que pode corromper o nosso layout)
+            _lockWindowPos = true;
 
             await Task.Run(() =>
             {
@@ -673,17 +704,6 @@ namespace TiaTracker.UI
                         SetProgress(0);
                         return;
                     }
-
-                    // Restaurar janela imediatamente após connect (TIA Portal pode ter corrompido o estado)
-                    Invoke((Action)(() =>
-                    {
-                        WindowState = FormWindowState.Normal;
-                        Bounds      = savedBounds;
-                        if (savedWindowState == FormWindowState.Maximized)
-                            WindowState = FormWindowState.Maximized;
-                        BringToFront();
-                        Activate();
-                    }));
                     SetProgress(20);
 
                     var reader = new ProjectReader(_conn.Project);
@@ -725,6 +745,11 @@ namespace TiaTracker.UI
                     LogLine(ex.StackTrace ?? "", C_ERR);
                 }
             });
+
+            // Desbloquear + trazer janela para a frente
+            _lockWindowPos = false;
+            BringToFront();
+            Activate();
 
             _running = false;
             _btnRun.Enabled = true;
