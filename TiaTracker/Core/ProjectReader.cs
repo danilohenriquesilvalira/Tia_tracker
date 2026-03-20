@@ -392,45 +392,25 @@ namespace TiaTracker.Core
             var wireFrom = new Dictionary<(string uid, string port), (string uid, string port)>();
             var wireTo   = new Dictionary<(string uid, string port), List<(string uid, string port)>>();
 
+            // TIA Portal XML rule (confirmed from real XML analysis):
+            // The SOURCE of a wire is ALWAYS the FIRST element.
+            // Powerrail/OpenCon/IdentCon first → they drive into NameCon destinations.
+            // NameCon with output port first → part output drives into next part/variable.
             foreach (var wire in flgNet.Descendants().Where(e => e.Name.LocalName == "Wire"))
             {
                 var wNodes = wire.Elements().ToList();
                 if (wNodes.Count < 2) continue;
 
-                // Determine source by SEMANTICS, not position.
-                // TIA Portal can place DESTINATION first in the Wire element list.
-                // Priority 1: Powerrail  2: NameCon with output-type port  3: first IdentCon
+                // ── Source: always first child ────────────────────────────────
                 string srcUId = null, srcPort = null;
-
-                if (wNodes.Any(n => n.Name.LocalName == "Powerrail"))
+                var first = wNodes[0];
+                switch (first.Name.LocalName)
                 {
-                    srcUId = "PWR"; srcPort = "out";
-                }
-                else
-                {
-                    // Look for NameCon whose port name is an output-type
-                    foreach (var n in wNodes.Where(n => n.Name.LocalName == "NameCon"))
-                    {
-                        var p = n.Attribute("Name")?.Value ?? "";
-                        if (IsOutputPort(p))
-                        {
-                            srcUId = n.Attribute("UId")?.Value;
-                            srcPort = p;
-                            if (srcUId != null) break;
-                        }
-                    }
-                    // Fallback: first IdentCon is the source (variable driving into Part)
-                    if (srcUId == null)
-                    {
-                        var ic = wNodes.FirstOrDefault(n => n.Name.LocalName == "IdentCon");
-                        if (ic != null) { srcUId = ic.Attribute("UId")?.Value; srcPort = "out"; }
-                    }
-                    // Last fallback: first NameCon regardless of port name
-                    if (srcUId == null)
-                    {
-                        var nc = wNodes.FirstOrDefault(n => n.Name.LocalName == "NameCon");
-                        if (nc != null) { srcUId = nc.Attribute("UId")?.Value; srcPort = nc.Attribute("Name")?.Value ?? "out"; }
-                    }
+                    case "Powerrail": srcUId = "PWR";  srcPort = "out"; break;
+                    case "OpenCon":   srcUId = "OPEN"; srcPort = "out"; break;
+                    case "IdentCon":  srcUId = first.Attribute("UId")?.Value; srcPort = "out"; break;
+                    case "NameCon":   srcUId = first.Attribute("UId")?.Value;
+                                      srcPort = first.Attribute("Name")?.Value; break;
                 }
                 if (srcUId == null) continue;
 
@@ -438,24 +418,17 @@ namespace TiaTracker.Core
                 if (!wireTo.ContainsKey(srcKey))
                     wireTo[srcKey] = new List<(string uid, string port)>();
 
-                // All non-source elements are destinations
-                foreach (var n in wNodes)
+                // ── Destinations: all remaining children (fan-out supported) ─
+                for (int c = 1; c < wNodes.Count; c++)
                 {
+                    var el = wNodes[c];
                     string dstUId = null, dstPort = null;
-                    switch (n.Name.LocalName)
+                    switch (el.Name.LocalName)
                     {
-                        case "Powerrail": continue; // already handled as source
-                        case "OpenCon":   continue; // open endpoint — skip
-                        case "IdentCon":
-                            dstUId = n.Attribute("UId")?.Value;
-                            if (dstUId == srcUId) continue; // skip — this is the source
-                            dstPort = "in";
-                            break;
-                        case "NameCon":
-                            dstUId = n.Attribute("UId")?.Value;
-                            dstPort = n.Attribute("Name")?.Value ?? "in";
-                            if (dstUId == srcUId && dstPort == srcPort) continue; // skip — this is the source
-                            break;
+                        case "NameCon":  dstUId = el.Attribute("UId")?.Value;
+                                         dstPort = el.Attribute("Name")?.Value ?? "in"; break;
+                        case "IdentCon": dstUId = el.Attribute("UId")?.Value; dstPort = "in"; break;
+                        case "OpenCon":  continue; // unconnected output terminal — skip
                     }
                     if (dstUId == null) continue;
 
@@ -491,10 +464,11 @@ namespace TiaTracker.Core
                     if (partName == "Sr")
                     {
                         // Sr: R1 tem prioridade sobre S
+                        // Portas no XML são minúsculas: "s", "r1", "q", "operand"
                         string sIn  = "(sem ligação)";
                         string r1In = "(sem ligação)";
-                        if (wireFrom.TryGetValue((uid, "S"),  out var sSrc))  sIn  = ResolveNode(sSrc.uid,  sSrc.port,  accessMap, partMap, callMap, wireFrom, 0);
-                        if (wireFrom.TryGetValue((uid, "R1"), out var r1Src)) r1In = ResolveNode(r1Src.uid, r1Src.port, accessMap, partMap, callMap, wireFrom, 0);
+                        if (wireFrom.TryGetValue((uid, "s"),  out var sSrc))  sIn  = ResolveNode(sSrc.uid,  sSrc.port,  accessMap, partMap, callMap, wireFrom, 0);
+                        if (wireFrom.TryGetValue((uid, "r1"), out var r1Src)) r1In = ResolveNode(r1Src.uid, r1Src.port, accessMap, partMap, callMap, wireFrom, 0);
                         result.Add($"SR flip-flop  {ffOperand}:  // R1 tem prioridade");
                         result.Add($"  S  := {sIn}");
                         result.Add($"  R1 := {r1In}");
@@ -502,10 +476,11 @@ namespace TiaTracker.Core
                     else // Rs
                     {
                         // Rs: S1 tem prioridade sobre R
+                        // Portas no XML são minúsculas: "s1", "r", "q", "operand"
                         string s1In = "(sem ligação)";
                         string rIn  = "(sem ligação)";
-                        if (wireFrom.TryGetValue((uid, "S1"), out var s1Src)) s1In = ResolveNode(s1Src.uid, s1Src.port, accessMap, partMap, callMap, wireFrom, 0);
-                        if (wireFrom.TryGetValue((uid, "R"),  out var rSrc))  rIn  = ResolveNode(rSrc.uid,  rSrc.port,  accessMap, partMap, callMap, wireFrom, 0);
+                        if (wireFrom.TryGetValue((uid, "s1"), out var s1Src)) s1In = ResolveNode(s1Src.uid, s1Src.port, accessMap, partMap, callMap, wireFrom, 0);
+                        if (wireFrom.TryGetValue((uid, "r"),  out var rSrc))  rIn  = ResolveNode(rSrc.uid,  rSrc.port,  accessMap, partMap, callMap, wireFrom, 0);
                         result.Add($"RS flip-flop  {ffOperand}:  // S1 tem prioridade");
                         result.Add($"  S1 := {s1In}");
                         result.Add($"  R  := {rIn}");
@@ -518,20 +493,40 @@ namespace TiaTracker.Core
                 if (wireFrom.TryGetValue((uid, "operand"), out var opSrc))
                     operand = ResolveNode(opSrc.uid, opSrc.port, accessMap, partMap, callMap, wireFrom, 0);
 
-                string condition = "(PowerRail)";
+                // Condition: resolve the "in" port of the coil
+                string condition = "";
                 if (wireFrom.TryGetValue((uid, "in"), out var inSrc))
-                    condition = ResolveNode(inSrc.uid, inSrc.port, accessMap, partMap, callMap, wireFrom, 0);
+                {
+                    if (inSrc.uid != "PWR" && inSrc.uid != "OPEN")
+                        condition = ResolveNode(inSrc.uid, inSrc.port, accessMap, partMap, callMap, wireFrom, 0);
+                }
 
                 if (string.IsNullOrEmpty(operand)) continue;
 
-                bool always = condition == "(PowerRail)" || condition == "TRUE" || string.IsNullOrEmpty(condition);
+                // Negated coil: check <Negated Name="operand"/> on the Part
+                bool negatedOp = kv.Value.Elements()
+                    .Any(e => e.Name.LocalName == "Negated" &&
+                              e.Attribute("Name")?.Value == "operand");
+
+                bool always = string.IsNullOrEmpty(condition);
                 switch (partName)
                 {
-                    case "SCoil": result.Add(always ? $"SET   {operand}"   : $"IF {condition} THEN SET {operand}");   break;
-                    case "RCoil": result.Add(always ? $"RESET {operand}"   : $"IF {condition} THEN RESET {operand}"); break;
-                    case "PCoil": result.Add(always ? $"P_SET {operand}"   : $"IF ↑{condition} THEN SET {operand}");  break;
-                    case "NCoil": result.Add(always ? $"N_SET {operand}"   : $"IF ↓{condition} THEN SET {operand}");  break;
-                    default:      result.Add(always ? $"{operand} := TRUE"  : $"{operand} := {condition}");            break;
+                    case "SCoil": result.Add(always ? $"SET   {operand}"
+                                                    : $"IF {condition} THEN SET {operand}");              break;
+                    case "RCoil": result.Add(always ? $"RESET {operand}"
+                                                    : $"IF {condition} THEN RESET {operand}");            break;
+                    case "PCoil": result.Add(always ? $"SET ↑ {operand}"
+                                                    : $"IF ↑({condition}) THEN SET {operand}");           break;
+                    case "NCoil": result.Add(always ? $"SET ↓ {operand}"
+                                                    : $"IF ↓({condition}) THEN SET {operand}");           break;
+                    default:
+                        if (negatedOp)
+                            result.Add(always ? $"{operand} := NOT(entrada)"
+                                              : $"{operand} := NOT({condition})");
+                        else
+                            result.Add(always ? $"{operand} := TRUE"
+                                              : $"{operand} := {condition}");
+                        break;
                 }
             }
 
@@ -694,7 +689,7 @@ namespace TiaTracker.Core
         {
             if (depth > 12) return "...";
             if (uid == "PWR")  return "(PowerRail)";
-            if (uid == "OPEN") return "OPEN";
+            if (uid == "OPEN") return "(sem entrada)";
 
             // Access element = variable or constant
             if (accessMap.TryGetValue(uid, out var acc))
@@ -747,22 +742,6 @@ namespace TiaTracker.Core
                 }
             }
             return blockName;
-        }
-
-        /// <summary>Returns true if the named port is an output-type port (produces a value).</summary>
-        private static bool IsOutputPort(string portName)
-        {
-            if (string.IsNullOrEmpty(portName)) return false;
-            // Exact output port names used by TIA Portal instructions
-            switch (portName.ToLowerInvariant())
-            {
-                case "out": case "eno": case "q": case "qu": case "qd":
-                case "et": case "cv": case "ret_val": case "result":
-                    return true;
-            }
-            // Named output ports like "out1", "out2", "outvalue" etc.
-            if (portName.StartsWith("out", StringComparison.OrdinalIgnoreCase)) return true;
-            return false;
         }
 
         /// <summary>Reads instance name from a timer/counter/function-block Part element.</summary>
@@ -968,9 +947,21 @@ namespace TiaTracker.Core
                 case "Insert":  return $"INSERT(IN:={Inp("IN")}, IN1:={Inp("IN1")}, P:={Inp("P")})";
                 case "Delete":  return $"DELETE(IN:={Inp("IN")}, L:={Inp("L")}, P:={Inp("P")})";
 
-                // ── RS/SR flip-flops ──────────────────────────────────────────
-                case "RS": case "Rs": return $"RS flip-flop: S1:={Inp("S1")}, R:={Inp("R")}";
-                case "SR": case "Sr": return $"SR flip-flop: S:={Inp("S")}, R1:={Inp("R1")}";
+                // ── SR/RS flip-flops — Q output usado como valor intermediário ─
+                // Portas no XML são minúsculas: s, r1, s1, r, q, operand
+                case "Sr":
+                {
+                    // Q output = valor atual do operand (a variável controlada)
+                    if (wireFrom.TryGetValue((uid, "operand"), out var srOp))
+                        return ResolveNode(srOp.uid, srOp.port, accessMap, partMap, callMap, wireFrom, depth + 1);
+                    return $"SR(S:={Inp("s")}, R1:={Inp("r1")}).Q";
+                }
+                case "Rs":
+                {
+                    if (wireFrom.TryGetValue((uid, "operand"), out var rsOp))
+                        return ResolveNode(rsOp.uid, rsOp.port, accessMap, partMap, callMap, wireFrom, depth + 1);
+                    return $"RS(S1:={Inp("s1")}, R:={Inp("r")}).Q";
+                }
 
                 // ── Edge detection ────────────────────────────────────────────
                 case "PBox": case "RLO_P": return $"P_TRIG({Inp("CLK")})";
