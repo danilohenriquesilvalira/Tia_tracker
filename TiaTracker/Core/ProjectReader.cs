@@ -395,42 +395,40 @@ namespace TiaTracker.Core
                 var children = wire.Elements().ToList();
                 if (children.Count < 2) continue;
 
+                // First child = SOURCE of this wire
                 string srcUId = null, srcPort = null;
-                string dstUId = null, dstPort = null;
-
                 var first = children[0];
                 switch (first.Name.LocalName)
                 {
-                    case "IdentCon":  srcUId = first.Attribute("UId")?.Value; srcPort = null;  break;
+                    case "Powerrail": srcUId = "PWR";  srcPort = "out"; break;
+                    case "OpenCon":   srcUId = "OPEN"; srcPort = "out"; break;
+                    case "IdentCon":  srcUId = first.Attribute("UId")?.Value; srcPort = "out"; break;
                     case "NameCon":   srcUId = first.Attribute("UId")?.Value; srcPort = first.Attribute("Name")?.Value; break;
-                    case "Powerrail": srcUId = "PWR";  srcPort = null; break;
-                    case "OpenCon":   srcUId = "OPEN"; srcPort = null; break;
                 }
-
-                // Destination can be NameCon OR IdentCon (e.g. Call output → variable)
-                var second = children[1];
-                switch (second.Name.LocalName)
-                {
-                    case "NameCon":
-                        dstUId  = second.Attribute("UId")?.Value;
-                        dstPort = second.Attribute("Name")?.Value ?? "in";
-                        break;
-                    case "IdentCon":
-                        dstUId  = second.Attribute("UId")?.Value;
-                        dstPort = "in"; // direct connection (e.g. output → variable)
-                        break;
-                }
-
-                if (srcUId == null || dstUId == null) continue;
+                if (srcUId == null) continue;
 
                 var srcKey = (srcUId, srcPort ?? "out");
-                var dstKey = (dstUId, dstPort ?? "in");
-
-                wireFrom[dstKey] = (srcUId, srcPort);
-
                 if (!wireTo.ContainsKey(srcKey))
                     wireTo[srcKey] = new List<(string uid, string port)>();
-                wireTo[srcKey].Add(dstKey);
+
+                // Remaining children = DESTINATIONS (one wire can fan out to multiple inputs)
+                for (int c = 1; c < children.Count; c++)
+                {
+                    var el = children[c];
+                    string dstUId = null, dstPort = null;
+                    switch (el.Name.LocalName)
+                    {
+                        case "NameCon":  dstUId = el.Attribute("UId")?.Value; dstPort = el.Attribute("Name")?.Value ?? "in"; break;
+                        case "IdentCon": dstUId = el.Attribute("UId")?.Value; dstPort = "in"; break;
+                        case "OpenCon":  continue; // open endpoint — skip
+                    }
+                    if (dstUId == null) continue;
+
+                    var dstKey = (dstUId, dstPort ?? "in");
+                    wireFrom[dstKey] = (srcUId, srcPort);
+                    if (!wireTo[srcKey].Contains(dstKey))
+                        wireTo[srcKey].Add(dstKey);
+                }
             }
 
             // ── 3. Find ALL output points and generate lines ───────────────────
@@ -488,16 +486,28 @@ namespace TiaTracker.Core
 
                 result.Add(header);
 
-                // Input parameters (wires INTO the call), sorted
+                // Parse parameter sections from CallInfo to know Input/Output/InOut
+                var paramSections = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (ci != null)
+                    foreach (var p in ci.Elements().Where(e => e.Name.LocalName == "Parameter"))
+                    {
+                        var pName = p.Attribute("Name")?.Value;
+                        var pSec  = p.Attribute("Section")?.Value ?? "Input";
+                        if (pName != null) paramSections[pName] = pSec;
+                    }
+
+                // Input and InOut parameters (wires INTO the call)
                 var inPorts = wireFrom.Keys
                     .Where(k => k.uid == uid && k.port != "en" && k.port != "eno")
                     .OrderBy(k => k.port)
                     .ToList();
                 foreach (var pk in inPorts)
                 {
-                    var src = wireFrom[pk];
-                    var val = ResolveNode(src.uid, src.port, accessMap, partMap, callMap, wireFrom, 0);
-                    result.Add($"  IN  {pk.port} := {val}");
+                    var src  = wireFrom[pk];
+                    var val  = ResolveNode(src.uid, src.port, accessMap, partMap, callMap, wireFrom, 0);
+                    var sec  = paramSections.TryGetValue(pk.port, out var s) ? s : "Input";
+                    var label = sec == "InOut" ? "INOUT" : sec == "Output" ? "OUT" : "IN";
+                    result.Add($"  {label,-5} {pk.port} := {val}");
                 }
 
                 // Output parameters (wires OUT of the call → where they go)
@@ -507,10 +517,14 @@ namespace TiaTracker.Core
                     .ToList();
                 foreach (var pk in outPorts)
                 {
+                    // Skip ports already shown as InOut above (they appear in both wireFrom and wireTo)
+                    paramSections.TryGetValue(pk.port, out var pSec);
+                    if (pSec == "InOut") continue;
+
                     foreach (var dst in wireTo[pk])
                     {
                         string destName = ResolveDestination(dst.uid, dst.port, accessMap, partMap);
-                        result.Add($"  OUT {pk.port} => {destName}");
+                        result.Add($"  {"OUT",-5} {pk.port} => {destName}");
                     }
                 }
             }
@@ -661,6 +675,18 @@ namespace TiaTracker.Core
                 }
             }
             return blockName;
+        }
+
+        /// <summary>Reads instance name from a timer/counter/function-block Part element.</summary>
+        private static string GetPartInstanceName(XElement part)
+        {
+            var instEl = part.Elements().FirstOrDefault(e => e.Name.LocalName == "Instance");
+            if (instEl == null) return null;
+            // Instance may contain Component directly or a Symbol hierarchy
+            var sym = instEl.Descendants().FirstOrDefault(e => e.Name.LocalName == "Symbol");
+            if (sym != null) return GetVarNameFromSymbol(sym);
+            var comp = instEl.Elements().FirstOrDefault(e => e.Name.LocalName == "Component");
+            return comp?.Attribute("Name")?.Value;
         }
 
         private static string GetVarNameFromSymbol(XElement sym)
@@ -851,6 +877,86 @@ namespace TiaTracker.Core
                 case "FP":  return $"P_TRIG({Inp("in")})";
                 case "FN":  return $"N_TRIG({Inp("in")})";
 
+                // ── Timers (with instance name from Part element) ─────────────────────
+                case "TON":
+                {
+                    var inst = GetPartInstanceName(part);
+                    var prefix = inst != null ? $"{inst}(" : "TON(";
+                    return $"{prefix}IN:={Inp("IN")}, PT:={Inp("PT")})";
+                }
+                case "TOF":
+                {
+                    var inst = GetPartInstanceName(part);
+                    var prefix = inst != null ? $"{inst}(" : "TOF(";
+                    return $"{prefix}IN:={Inp("IN")}, PT:={Inp("PT")})";
+                }
+                case "TP":
+                {
+                    var inst = GetPartInstanceName(part);
+                    var prefix = inst != null ? $"{inst}(" : "TP(";
+                    return $"{prefix}IN:={Inp("IN")}, PT:={Inp("PT")})";
+                }
+                case "TONR":
+                {
+                    var inst = GetPartInstanceName(part);
+                    var prefix = inst != null ? $"{inst}(" : "TONR(";
+                    return $"{prefix}IN:={Inp("IN")}, R:={Inp("R")}, PT:={Inp("PT")})";
+                }
+
+                // ── Counters (with instance name) ────────────────────────────────────
+                case "CTU":
+                {
+                    var inst = GetPartInstanceName(part);
+                    var prefix = inst != null ? $"{inst}(" : "CTU(";
+                    return $"{prefix}CU:={Inp("CU")}, R:={Inp("R")}, PV:={Inp("PV")})";
+                }
+                case "CTD":
+                {
+                    var inst = GetPartInstanceName(part);
+                    var prefix = inst != null ? $"{inst}(" : "CTD(";
+                    return $"{prefix}CD:={Inp("CD")}, LD:={Inp("LD")}, PV:={Inp("PV")})";
+                }
+                case "CTUD":
+                {
+                    var inst = GetPartInstanceName(part);
+                    var prefix = inst != null ? $"{inst}(" : "CTUD(";
+                    return $"{prefix}CU:={Inp("CU")}, CD:={Inp("CD")}, R:={Inp("R")}, LD:={Inp("LD")}, PV:={Inp("PV")})";
+                }
+
+                // ── Calculate (expression box) ────────────────────────────────────────
+                case "Calculate":
+                case "CALCULATE":
+                {
+                    // The expression is stored in a TemplateValue named "Expression"
+                    var exprEl = part.Descendants()
+                        .FirstOrDefault(e => e.Name.LocalName == "TemplateValue" &&
+                                             e.Attribute("Name")?.Value == "Expression");
+                    var expr = exprEl?.Value ?? "?";
+                    // Collect all named inputs
+                    var calcInputs = wireFrom.Keys
+                        .Where(k => k.uid == uid)
+                        .OrderBy(k => k.port)
+                        .Select(k => { var s = wireFrom[k]; var v = ResolveNode(s.uid, s.port, accessMap, partMap, callMap, wireFrom, depth); return $"{k.port}:={v}"; });
+                    return $"CALCULATE({expr}; {string.Join(", ", calcInputs)})";
+                }
+
+                // ── Type conversion with explicit type ───────────────────────────────
+                case "TypeConvert":
+                case "CONV":
+                {
+                    var tplEl = part.Descendants()
+                        .FirstOrDefault(e => e.Name.LocalName == "TemplateValue" &&
+                                             e.Attribute("Name")?.Value == "srcType");
+                    var srcType = tplEl?.Value ?? "";
+                    var dstEl = part.Descendants()
+                        .FirstOrDefault(e => e.Name.LocalName == "TemplateValue" &&
+                                             e.Attribute("Name")?.Value == "dstType");
+                    var dstType = dstEl?.Value ?? "";
+                    return string.IsNullOrEmpty(srcType)
+                        ? $"CONVERT({Inp("in")})"
+                        : $"{srcType}_TO_{dstType}({Inp("in")})";
+                }
+
                 // ── Generic fallback (unknown Part) ───────────────────────────
                 default:
                 {
@@ -925,7 +1031,9 @@ namespace TiaTracker.Core
                 switch (el.Name.LocalName)
                 {
                     case "Component":
+                    {
                         var compName  = el.Attribute("Name")?.Value ?? "";
+                        var modifier  = el.Attribute("AccessModifier")?.Value ?? "";
                         var hasQuotes = el.Elements()
                             .Any(e => e.Name.LocalName == "BooleanAttribute" &&
                                       e.Attribute("Name")?.Value == "HasQuotes" &&
@@ -935,8 +1043,27 @@ namespace TiaTracker.Core
                         if (lastWasComponent && sb.Length > 0)
                             sb.Append('.');
                         sb.Append(hasQuotes ? $"\"{compName}\"" : compName);
+                        // Handle array indices: Component children that are Access elements
+                        if (modifier == "Array" || el.Elements().Any(e => e.Name.LocalName == "Access"))
+                        {
+                            var indices = el.Elements()
+                                .Where(e => e.Name.LocalName == "Access")
+                                .Select(idxAcc =>
+                                {
+                                    var cv = idxAcc.Descendants()
+                                        .FirstOrDefault(e2 => e2.Name.LocalName == "ConstantValue")?.Value;
+                                    if (cv != null) return cv;
+                                    // Symbolic index (variable)
+                                    var idxSym = idxAcc.Descendants().FirstOrDefault(e2 => e2.Name.LocalName == "Symbol");
+                                    return idxSym != null ? GetVarNameFromSymbol(idxSym) : "?";
+                                })
+                                .ToList();
+                            if (indices.Count > 0)
+                                sb.Append($"[{string.Join(", ", indices)}]");
+                        }
                         lastWasComponent = true;
                         break;
+                    }
                     case "Token":
                         sb.Append(el.Attribute("Text")?.Value ?? "");
                         lastWasComponent = false;
@@ -1007,13 +1134,33 @@ namespace TiaTracker.Core
                 switch (el.Name.LocalName)
                 {
                     case "Component":
+                    {
                         var compName  = el.Attribute("Name")?.Value ?? "";
+                        var modifier  = el.Attribute("AccessModifier")?.Value ?? "";
                         var hasQuotes = el.Elements()
                             .Any(e => e.Name.LocalName == "BooleanAttribute" &&
                                       e.Attribute("Name")?.Value == "HasQuotes" &&
                                       e.Value == "true");
                         sb.Append(hasQuotes ? $"\"{compName}\"" : compName);
+                        // Handle array indices: Component children that are Access elements
+                        if (modifier == "Array" || el.Elements().Any(e => e.Name.LocalName == "Access"))
+                        {
+                            var indices = el.Elements()
+                                .Where(e => e.Name.LocalName == "Access")
+                                .Select(idxAcc =>
+                                {
+                                    var cv = idxAcc.Descendants()
+                                        .FirstOrDefault(e2 => e2.Name.LocalName == "ConstantValue")?.Value;
+                                    if (cv != null) return cv;
+                                    var idxSym = idxAcc.Descendants().FirstOrDefault(e2 => e2.Name.LocalName == "Symbol");
+                                    return idxSym != null ? GetVarNameFromSymbol(idxSym) : "?";
+                                })
+                                .ToList();
+                            if (indices.Count > 0)
+                                sb.Append($"[{string.Join(", ", indices)}]");
+                        }
                         break;
+                    }
                     case "Token":
                         sb.Append(el.Attribute("Text")?.Value ?? "");
                         break;
