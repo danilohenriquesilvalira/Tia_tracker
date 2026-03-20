@@ -392,18 +392,43 @@ namespace TiaTracker.Core
 
             foreach (var wire in flgNet.Descendants().Where(e => e.Name.LocalName == "Wire"))
             {
-                var children = wire.Elements().ToList();
-                if (children.Count < 2) continue;
+                var wNodes = wire.Elements().ToList();
+                if (wNodes.Count < 2) continue;
 
-                // First child = SOURCE of this wire
+                // Determine source by SEMANTICS, not position.
+                // TIA Portal can place DESTINATION first in the Wire element list.
+                // Priority 1: Powerrail  2: NameCon with output-type port  3: first IdentCon
                 string srcUId = null, srcPort = null;
-                var first = children[0];
-                switch (first.Name.LocalName)
+
+                if (wNodes.Any(n => n.Name.LocalName == "Powerrail"))
                 {
-                    case "Powerrail": srcUId = "PWR";  srcPort = "out"; break;
-                    case "OpenCon":   srcUId = "OPEN"; srcPort = "out"; break;
-                    case "IdentCon":  srcUId = first.Attribute("UId")?.Value; srcPort = "out"; break;
-                    case "NameCon":   srcUId = first.Attribute("UId")?.Value; srcPort = first.Attribute("Name")?.Value; break;
+                    srcUId = "PWR"; srcPort = "out";
+                }
+                else
+                {
+                    // Look for NameCon whose port name is an output-type
+                    foreach (var n in wNodes.Where(n => n.Name.LocalName == "NameCon"))
+                    {
+                        var p = n.Attribute("Name")?.Value ?? "";
+                        if (IsOutputPort(p))
+                        {
+                            srcUId = n.Attribute("UId")?.Value;
+                            srcPort = p;
+                            if (srcUId != null) break;
+                        }
+                    }
+                    // Fallback: first IdentCon is the source (variable driving into Part)
+                    if (srcUId == null)
+                    {
+                        var ic = wNodes.FirstOrDefault(n => n.Name.LocalName == "IdentCon");
+                        if (ic != null) { srcUId = ic.Attribute("UId")?.Value; srcPort = "out"; }
+                    }
+                    // Last fallback: first NameCon regardless of port name
+                    if (srcUId == null)
+                    {
+                        var nc = wNodes.FirstOrDefault(n => n.Name.LocalName == "NameCon");
+                        if (nc != null) { srcUId = nc.Attribute("UId")?.Value; srcPort = nc.Attribute("Name")?.Value ?? "out"; }
+                    }
                 }
                 if (srcUId == null) continue;
 
@@ -411,16 +436,24 @@ namespace TiaTracker.Core
                 if (!wireTo.ContainsKey(srcKey))
                     wireTo[srcKey] = new List<(string uid, string port)>();
 
-                // Remaining children = DESTINATIONS (one wire can fan out to multiple inputs)
-                for (int c = 1; c < children.Count; c++)
+                // All non-source elements are destinations
+                foreach (var n in wNodes)
                 {
-                    var el = children[c];
                     string dstUId = null, dstPort = null;
-                    switch (el.Name.LocalName)
+                    switch (n.Name.LocalName)
                     {
-                        case "NameCon":  dstUId = el.Attribute("UId")?.Value; dstPort = el.Attribute("Name")?.Value ?? "in"; break;
-                        case "IdentCon": dstUId = el.Attribute("UId")?.Value; dstPort = "in"; break;
-                        case "OpenCon":  continue; // open endpoint — skip
+                        case "Powerrail": continue; // already handled as source
+                        case "OpenCon":   continue; // open endpoint — skip
+                        case "IdentCon":
+                            dstUId = n.Attribute("UId")?.Value;
+                            if (dstUId == srcUId) continue; // skip — this is the source
+                            dstPort = "in";
+                            break;
+                        case "NameCon":
+                            dstUId = n.Attribute("UId")?.Value;
+                            dstPort = n.Attribute("Name")?.Value ?? "in";
+                            if (dstUId == srcUId && dstPort == srcPort) continue; // skip — this is the source
+                            break;
                     }
                     if (dstUId == null) continue;
 
@@ -714,6 +747,22 @@ namespace TiaTracker.Core
             return blockName;
         }
 
+        /// <summary>Returns true if the named port is an output-type port (produces a value).</summary>
+        private static bool IsOutputPort(string portName)
+        {
+            if (string.IsNullOrEmpty(portName)) return false;
+            // Exact output port names used by TIA Portal instructions
+            switch (portName.ToLowerInvariant())
+            {
+                case "out": case "eno": case "q": case "qu": case "qd":
+                case "et": case "cv": case "ret_val": case "result":
+                    return true;
+            }
+            // Named output ports like "out1", "out2", "outvalue" etc.
+            if (portName.StartsWith("out", StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
         /// <summary>Reads instance name from a timer/counter/function-block Part element.</summary>
         private static string GetPartInstanceName(XElement part)
         {
@@ -816,7 +865,20 @@ namespace TiaTracker.Core
                     if (!wireFrom.TryGetValue((uid, "operand"), out var src)) return "Contact(?)";
                     var v   = ResolveNode(src.uid, src.port, accessMap, partMap, callMap, wireFrom, depth);
                     bool ng = part.Attribute("Negated")?.Value == "true" || negatedPorts.Contains("operand");
-                    return ng ? $"NOT({v})" : v;
+                    var contactExpr = ng ? $"NOT({v})" : v;
+                    // LAD series: if "in" is not PowerRail, chain previous condition with AND
+                    if (wireFrom.TryGetValue((uid, "in"), out var inSrc) &&
+                        inSrc.uid != "PWR" && inSrc.uid != "OPEN")
+                    {
+                        var prev = ResolveNode(inSrc.uid, inSrc.port, accessMap, partMap, callMap, wireFrom, depth);
+                        if (!string.IsNullOrEmpty(prev) && prev != "(PowerRail)")
+                        {
+                            if (prev.Contains(" OR "))         prev         = $"({prev})";
+                            if (contactExpr.Contains(" OR "))  contactExpr  = $"({contactExpr})";
+                            return $"{prev} AND {contactExpr}";
+                        }
+                    }
+                    return contactExpr;
                 }
                 case "Coil": case "SCoil": case "RCoil": case "PCoil": case "NCoil":
                     return "[COIL]"; // handled at a higher level
