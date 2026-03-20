@@ -5,15 +5,31 @@ namespace TiaTracker.Core.FbdParsers
 {
     /// <summary>
     /// Parser de Counter Operations (FBD/LAD) — S7-1200/S7-1500.
-    /// TODO: implementar após receber XML real de cada counter.
+    /// Verificado com XML real exportado do TIA Portal V18 (FC "Counter operation").
     ///
-    /// Instruções a suportar:
-    ///   CTU  — Counter Up       (CU, R, PV → Q, CV)
-    ///   CTD  — Counter Down     (CD, LD, PV → Q, CV)
-    ///   CTUD — Counter Up/Down  (CU, CD, R, LD, PV → QU, QD, CV)
+    /// Instruções suportadas:
+    ///   CTU  — Count up        (CU, R, PV  →  Q → Coil,  CV → IdentCon)
+    ///   CTD  — Count down      (CD, LD, PV →  Q → Coil,  CV → IdentCon)
+    ///   CTUD — Count up/down   (CU, CD, R, LD, PV  →  QU → Coil,  QD → IdentCon,  CV → IdentCon)
     ///
-    /// Todas têm elemento <Instance> para variável de instância.
-    /// Confirmar portas maiúsculas/minúsculas via XML real.
+    /// Estrutura XML do Part (exemplo CTU):
+    ///   <Part Name="CTU" Version="1.0" UId="26">
+    ///     <Instance Scope="GlobalVariable" UId="27">
+    ///       <Component Name="IEC_Counter_0_DB"/>
+    ///     </Instance>
+    ///     <TemplateValue Name="value_type" Type="Type">Int</TemplateValue>
+    ///   </Part>
+    ///
+    /// Portas confirmadas (MAIÚSCULAS):
+    ///   CTU : entradas CU, R, PV  — saída Q (→ Coil), CV (→ IdentCon direto)
+    ///   CTD : entradas CD, LD, PV — saída Q (→ Coil), CV (→ IdentCon direto)
+    ///   CTUD: entradas CU, CD, R, LD, PV
+    ///         saídas QU (→ Coil), QD (→ IdentCon direto), CV (→ IdentCon direto)
+    ///
+    /// Fluxo de processamento:
+    ///   Q / QU → Coil: BitLogicParser.CollectCoil resolve Coil.in → ResolveNode(counterUid)
+    ///                  → Dispatch → CounterParser.Resolve() retorna expressão de chamada inline.
+    ///   CV / QD → variável: CounterParser.CollectOutputs gera "var := inst.CV / inst.QD".
     /// </summary>
     internal static class CounterParser
     {
@@ -40,9 +56,14 @@ namespace TiaTracker.Core.FbdParsers
             }
         }
 
+        /// <summary>
+        /// Coleta saídas diretas dos counters para variáveis (sem passar por Coil).
+        ///   CTU / CTD : CV → variável
+        ///   CTUD      : CV → variável  +  QD → variável
+        /// Q e QU → Coil já são tratados por BitLogicParser.CollectOutputs.
+        /// </summary>
         internal static void CollectOutputs(FbdContext ctx, List<string> result)
         {
-            // CV saída → variável (QU/QD normalmente vão para Coil — coberto por BitLogicParser)
             foreach (var kv in ctx.PartMap)
             {
                 var uid  = kv.Key;
@@ -52,10 +73,17 @@ namespace TiaTracker.Core.FbdParsers
 
                 var inst = FbdContext.GetPartInstanceName(part) ?? name;
 
+                // CV → variável  (CTU, CTD, CTUD)
                 if (ctx.WireTo.TryGetValue((uid, "CV"), out var cvDsts))
                     foreach (var dst in cvDsts)
                         if (ctx.AccessMap.ContainsKey(dst.uid))
                             result.Add($"{ctx.ResolveDestination(dst.uid, dst.port)} := {inst}.CV");
+
+                // QD → variável  (CTUD apenas — QU vai para Coil, QD vai direto para IdentCon)
+                if (name == "CTUD" && ctx.WireTo.TryGetValue((uid, "QD"), out var qdDsts))
+                    foreach (var dst in qdDsts)
+                        if (ctx.AccessMap.ContainsKey(dst.uid))
+                            result.Add($"{ctx.ResolveDestination(dst.uid, dst.port)} := {inst}.QD");
             }
         }
     }

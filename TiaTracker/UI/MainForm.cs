@@ -651,6 +651,10 @@ namespace TiaTracker.UI
             SetStatus("A preparar...", Color.Silver);
             SetStats("");
 
+            // Guardar estado da janela antes de abrir o TIA Portal (que pode roubar foco e distorcer o layout)
+            var savedWindowState  = WindowState;
+            var savedBounds       = (WindowState == FormWindowState.Normal) ? Bounds : RestoreBounds;
+
             var path = _txtPath.Text.Trim();
 
             await Task.Run(() =>
@@ -669,6 +673,17 @@ namespace TiaTracker.UI
                         SetProgress(0);
                         return;
                     }
+
+                    // Restaurar janela imediatamente após connect (TIA Portal pode ter corrompido o estado)
+                    Invoke((Action)(() =>
+                    {
+                        WindowState = FormWindowState.Normal;
+                        Bounds      = savedBounds;
+                        if (savedWindowState == FormWindowState.Maximized)
+                            WindowState = FormWindowState.Maximized;
+                        BringToFront();
+                        Activate();
+                    }));
                     SetProgress(20);
 
                     var reader = new ProjectReader(_conn.Project);

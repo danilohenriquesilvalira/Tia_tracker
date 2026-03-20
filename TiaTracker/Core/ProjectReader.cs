@@ -132,7 +132,7 @@ namespace TiaTracker.Core
                         var calledName = after.Substring(0, bracket).Trim();
                         if (nameMap.TryGetValue(calledName, out var calledBlock))
                         {
-                            var numbered = $"{calledBlock.Type}{calledBlock.Number} â€” {calledName}";
+                            var numbered = $"{calledBlock.Type}{calledBlock.Number} \u2013 {calledName}";
                             net.Lines[i] = line.Substring(0, callIdx + 5) + numbered + after.Substring(bracket);
                         }
                     }
@@ -538,11 +538,17 @@ namespace TiaTracker.Core
                 var uid      = kv.Key;
                 var partName = kv.Value.Attribute("Name")?.Value ?? "";
 
-                // Pular partes jÃ¡ tratadas por BitLogicParser.CollectOutputs
+                // Pular partes já tratadas pelos sub-parsers CollectOutputs
+                if (MathParser.Handled.Contains(partName))       continue;
+                if (ConversionParser.Handled.Contains(partName)) continue;
+                if (MoveParser.Handled.Contains(partName))       continue;
                 switch (partName)
                 {
                     case "Coil": case "SCoil": case "RCoil": case "PCoil": case "NCoil":
-                    case "Sr":   case "Rs":                    case "R_TRIG": case "F_TRIG":                        continue;
+                    case "Sr":   case "Rs":    case "R_TRIG": case "F_TRIG":
+                    case "TP":   case "TON":   case "TOF":    case "TONR":
+                    case "CTU":  case "CTD":   case "CTUD":
+                        continue;
                 }
 
                 // CondiÃ§Ã£o EN
