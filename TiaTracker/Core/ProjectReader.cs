@@ -68,6 +68,7 @@ namespace TiaTracker.Core
         public string            Device     { get; set; }
         public int               Number     { get; set; }
         public string            FolderPath { get; set; } = "";   // ex: "Motor Control/Safety"
+        public string            RawXml     { get; set; } = "";   // XML bruto exportado pelo TIA
         public List<SectionInfo> Interface  { get; set; } = new List<SectionInfo>();
         public List<NetworkInfo> Networks   { get; set; } = new List<NetworkInfo>();
     }
@@ -208,6 +209,7 @@ namespace TiaTracker.Core
                     Device     = deviceName,
                     Number     = number,
                     FolderPath = folderPath,
+                    RawXml     = xml,
                     Interface  = iface,
                     Networks   = networks
                 };

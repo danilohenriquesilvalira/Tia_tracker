@@ -284,8 +284,23 @@ namespace TiaTracker.UI
                 Indent        = 18,
                 DrawMode      = TreeViewDrawMode.OwnerDrawAll
             };
-            _tree.DrawNode  += DrawTreeNode;
+            _tree.DrawNode    += DrawTreeNode;
             _tree.AfterSelect += OnTreeSelect;
+
+            // ── Context menu: botão direito na árvore ─────────────────────────
+            var ctxMenu = new ContextMenuStrip { BackColor = PANEL, ForeColor = C_TEXT, ShowImageMargin = false };
+            ctxMenu.Renderer = new DarkMenuRenderer();
+
+            var ctxExportXml = new ToolStripMenuItem("Exportar XML do bloco...") { ForeColor = C_TEXT };
+            ctxExportXml.Click += (s, e) => ExportSelectedBlockXml();
+            ctxMenu.Items.Add(ctxExportXml);
+
+            _tree.ContextMenuStrip = ctxMenu;
+            ctxMenu.Opening += (s, e) =>
+            {
+                var node = _tree.SelectedNode;
+                ctxExportXml.Enabled = node?.Tag is BlockInfo b && !string.IsNullOrEmpty(b.RawXml);
+            };
 
             outerSplit.Panel1.Controls.Add(_tree);
             outerSplit.Panel1.Controls.Add(searchBorder);
@@ -871,6 +886,42 @@ namespace TiaTracker.UI
             parent.Nodes.Add(grp);
         }
 
+        // ── Exportar XML do bloco selecionado ────────────────────────────────
+        private void ExportSelectedBlockXml()
+        {
+            if (!(_tree.SelectedNode?.Tag is BlockInfo b) || string.IsNullOrEmpty(b.RawXml))
+            {
+                MessageBox.Show("Selecione um bloco (FC/FB/OB/DB) na árvore.", "Exportar XML",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using var dlg = new SaveFileDialog
+            {
+                Title            = "Salvar XML do bloco",
+                Filter           = "XML files (*.xml)|*.xml|All files (*.*)|*.*",
+                FileName         = $"{b.Type}{b.Number}_{BlockExporter.Sanitize(b.Name)}.xml",
+                DefaultExt       = "xml",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+            };
+
+            if (dlg.ShowDialog() != DialogResult.OK) return;
+
+            try
+            {
+                File.WriteAllText(dlg.FileName, b.RawXml, System.Text.Encoding.UTF8);
+                _lblStatus.Text = $"XML exportado: {Path.GetFileName(dlg.FileName)}";
+                MessageBox.Show($"XML salvo em:\n{dlg.FileName}", "Exportar XML",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                _lblStatus.Text = $"Erro ao exportar XML: {ex.Message}";
+                MessageBox.Show($"Erro ao salvar:\n{ex.Message}", "Exportar XML",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         // ── Tree Selection ────────────────────────────────────────────────────
         private void OnTreeSelect(object sender, TreeViewEventArgs e)
         {
@@ -1433,6 +1484,40 @@ namespace TiaTracker.UI
             else if (value.Contains("[AutoAccept]"))
                 col = Color.FromArgb(80, 170, 220);
             _form.LogLine(value, col);
+        }
+    }
+
+    // ── Dark theme renderer para ContextMenuStrip ─────────────────────────────
+    internal class DarkMenuRenderer : ToolStripProfessionalRenderer
+    {
+        static readonly Color BG_MENU  = Color.FromArgb(37, 37, 38);
+        static readonly Color FG_MENU  = Color.FromArgb(212, 212, 212);
+        static readonly Color SEL_MENU = Color.FromArgb(38, 79, 120);
+        static readonly Color BORDER   = Color.FromArgb(68, 68, 68);
+
+        public DarkMenuRenderer() : base(new DarkMenuColors()) { }
+
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            var c = e.Item.Selected ? SEL_MENU : BG_MENU;
+            e.Graphics.FillRectangle(new SolidBrush(c), e.Item.ContentRectangle);
+        }
+
+        protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+            => e.Graphics.FillRectangle(new SolidBrush(BG_MENU), e.AffectedBounds);
+
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+            => e.Graphics.DrawRectangle(new Pen(BORDER), 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
+
+        private class DarkMenuColors : ProfessionalColorTable
+        {
+            public override Color MenuItemSelected         => Color.FromArgb(38, 79, 120);
+            public override Color MenuItemBorder           => Color.FromArgb(68, 68, 68);
+            public override Color MenuBorder               => Color.FromArgb(68, 68, 68);
+            public override Color ToolStripDropDownBackground => Color.FromArgb(37, 37, 38);
+            public override Color ImageMarginGradientBegin => Color.FromArgb(37, 37, 38);
+            public override Color ImageMarginGradientMiddle=> Color.FromArgb(37, 37, 38);
+            public override Color ImageMarginGradientEnd   => Color.FromArgb(37, 37, 38);
         }
     }
 }
