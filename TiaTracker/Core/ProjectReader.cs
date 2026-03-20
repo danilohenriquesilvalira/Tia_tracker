@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -11,6 +11,7 @@ using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.Blocks;
 using Siemens.Engineering.SW.Tags;
 using Siemens.Engineering.SW.Types;
+using TiaTracker.Core.FbdParsers;
 
 namespace TiaTracker.Core
 {
@@ -74,7 +75,7 @@ namespace TiaTracker.Core
     }
 
     /// <summary>
-    /// Lê todos os blocos do projecto offline — sem ir online, sem modificar nada.
+    /// LÃª todos os blocos do projecto offline â€” sem ir online, sem modificar nada.
     /// </summary>
     public class ProjectReader
     {
@@ -98,7 +99,7 @@ namespace TiaTracker.Core
                 ReadBlockGroup(plcSw.BlockGroup, device.Name, all);
             }
 
-            // Enriquecer chamadas: "CALL FC_Motor [FC]" → "CALL FC5 — FC_Motor [FC]"
+            // Enriquecer chamadas: "CALL FC_Motor [FC]" â†’ "CALL FC5 â€” FC_Motor [FC]"
             EnrichCallReferences(all);
 
             return all;
@@ -106,7 +107,7 @@ namespace TiaTracker.Core
 
         private static void EnrichCallReferences(List<BlockInfo> all)
         {
-            // Mapa nome → bloco (para lookup rápido)
+            // Mapa nome â†’ bloco (para lookup rÃ¡pido)
             var nameMap = new Dictionary<string, BlockInfo>(StringComparer.OrdinalIgnoreCase);
             foreach (var b in all)
                 if (!nameMap.ContainsKey(b.Name))
@@ -124,14 +125,14 @@ namespace TiaTracker.Core
                         if (callIdx < 0) continue;
 
                         // Extrair o nome do bloco chamado
-                        var after = line.Substring(callIdx + 5);         // após "CALL "
+                        var after = line.Substring(callIdx + 5);         // apÃ³s "CALL "
                         var bracket = after.IndexOf(" [", StringComparison.Ordinal);
                         if (bracket < 0) continue;
 
                         var calledName = after.Substring(0, bracket).Trim();
                         if (nameMap.TryGetValue(calledName, out var calledBlock))
                         {
-                            var numbered = $"{calledBlock.Type}{calledBlock.Number} — {calledName}";
+                            var numbered = $"{calledBlock.Type}{calledBlock.Number} â€” {calledName}";
                             net.Lines[i] = line.Substring(0, callIdx + 5) + numbered + after.Substring(bracket);
                         }
                     }
@@ -194,7 +195,7 @@ namespace TiaTracker.Core
                     var staticSec = iface.FirstOrDefault(s => s.Name == "Static");
                     if (staticSec != null && staticSec.Members.Count > 0)
                     {
-                        var net = new NetworkInfo { Index = 1, Title = "Variáveis", Language = "DB" };
+                        var net = new NetworkInfo { Index = 1, Title = "VariÃ¡veis", Language = "DB" };
                         foreach (var m in FlattenMembers(staticSec.Members, ""))
                             net.Lines.Add(m);
                         networks.Add(net);
@@ -225,7 +226,7 @@ namespace TiaTracker.Core
             }
         }
 
-        // ── Interface (parâmetros e variáveis do bloco) ───────────────────────
+        // â”€â”€ Interface (parÃ¢metros e variÃ¡veis do bloco) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         private static List<SectionInfo> ParseInterface(XDocument doc)
         {
@@ -297,7 +298,7 @@ namespace TiaTracker.Core
             }
         }
 
-        // ── Networks (CompileUnits) ───────────────────────────────────────────
+        // â”€â”€ Networks (CompileUnits) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         private static List<NetworkInfo> ParseNetworks(XDocument doc)
         {
@@ -347,7 +348,7 @@ namespace TiaTracker.Core
                     }
                     else
                     {
-                        // LAD / FBD — reconstruct using wire graph
+                        // LAD / FBD â€” reconstruct using wire graph
                         net.Lines.AddRange(ReconstructLadFbd(sourceEl));
                     }
                 }
@@ -360,7 +361,7 @@ namespace TiaTracker.Core
             return result;
         }
 
-        // ── LAD / FBD wire-graph reconstruction ───────────────────────────────
+        // â”€â”€ LAD / FBD wire-graph reconstruction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         private static List<string> ReconstructLadFbd(XElement sourceEl)
         {
@@ -369,7 +370,7 @@ namespace TiaTracker.Core
             var flgNet = sourceEl.Elements().FirstOrDefault();
             if (flgNet == null) return result;
 
-            // ── 1. Build element maps (only top-level within FlgNet > Parts) ─
+            // â”€â”€ 1. Build element maps (only top-level within FlgNet > Parts) â”€
             var accessMap = new Dictionary<string, XElement>();
             var partMap   = new Dictionary<string, XElement>();
             var callMap   = new Dictionary<string, XElement>();
@@ -386,22 +387,22 @@ namespace TiaTracker.Core
                 else if (ln == "Call" && !callMap.ContainsKey(uid)) callMap[uid]  = el;
             }
 
-            // ── 2. Build bidirectional wire maps ──────────────────────────────
-            // wireFrom[(dst,dstPort)] = (src,srcPort)   ← for expression building (backward)
-            // wireTo  [(src,srcPort)] = list of (dst,dstPort)  ← for output discovery (forward)
+            // â”€â”€ 2. Build bidirectional wire maps â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // wireFrom[(dst,dstPort)] = (src,srcPort)   â† for expression building (backward)
+            // wireTo  [(src,srcPort)] = list of (dst,dstPort)  â† for output discovery (forward)
             var wireFrom = new Dictionary<(string uid, string port), (string uid, string port)>();
             var wireTo   = new Dictionary<(string uid, string port), List<(string uid, string port)>>();
 
             // TIA Portal XML rule (confirmed from real XML analysis):
             // The SOURCE of a wire is ALWAYS the FIRST element.
-            // Powerrail/OpenCon/IdentCon first → they drive into NameCon destinations.
-            // NameCon with output port first → part output drives into next part/variable.
+            // Powerrail/OpenCon/IdentCon first â†’ they drive into NameCon destinations.
+            // NameCon with output port first â†’ part output drives into next part/variable.
             foreach (var wire in flgNet.Descendants().Where(e => e.Name.LocalName == "Wire"))
             {
                 var wNodes = wire.Elements().ToList();
                 if (wNodes.Count < 2) continue;
 
-                // ── Source: always first child ────────────────────────────────
+                // â”€â”€ Source: always first child â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 string srcUId = null, srcPort = null;
                 var first = wNodes[0];
                 switch (first.Name.LocalName)
@@ -418,7 +419,7 @@ namespace TiaTracker.Core
                 if (!wireTo.ContainsKey(srcKey))
                     wireTo[srcKey] = new List<(string uid, string port)>();
 
-                // ── Destinations: all remaining children (fan-out supported) ─
+                // â”€â”€ Destinations: all remaining children (fan-out supported) â”€
                 for (int c = 1; c < wNodes.Count; c++)
                 {
                     var el = wNodes[c];
@@ -428,7 +429,7 @@ namespace TiaTracker.Core
                         case "NameCon":  dstUId = el.Attribute("UId")?.Value;
                                          dstPort = el.Attribute("Name")?.Value ?? "in"; break;
                         case "IdentCon": dstUId = el.Attribute("UId")?.Value; dstPort = "in"; break;
-                        case "OpenCon":  continue; // unconnected output terminal — skip
+                        case "OpenCon":  continue; // unconnected output terminal â€” skip
                     }
                     if (dstUId == null) continue;
 
@@ -439,120 +440,60 @@ namespace TiaTracker.Core
                 }
             }
 
-            // ── 3. Find ALL output points and generate lines ───────────────────
+            // â”€â”€ 3. Criar contexto compartilhado e recolher saÃ­das via sub-parsers â”€
+            var ctx = new FbdContext(accessMap, partMap, callMap, wireFrom, wireTo);
 
-            // 3a. Coils e flip-flops de saída (LAD/FBD)
-            foreach (var kv in partMap)
-            {
-                var partName = kv.Value.Attribute("Name")?.Value ?? "";
-                bool isCoilType = partName == "Coil"  || partName == "SCoil" || partName == "RCoil"
-                               || partName == "PCoil" || partName == "NCoil"
-                               || partName == "Sr"    || partName == "Rs";   // Set/Reset flip-flops
-                if (!isCoilType) continue;
+            // 3a. Bit logic: bobinas, flip-flops (AND, OR, Coil, Sr, Rs, ...) â”€
+            BitLogicParser.CollectOutputs(ctx, result);
 
-                var uid = kv.Key;
+            // 3b. Timers: TON, TOF, TP, TONR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            TimerParser.CollectOutputs(ctx, result);
 
-                // ── Flip-flops Sr / Rs — lógica especial com portas S/R1 e S1/R ──
-                if (partName == "Sr" || partName == "Rs")
-                {
-                    // Operand (InOut) — variável controlada
-                    string ffOperand = "";
-                    if (wireFrom.TryGetValue((uid, "operand"), out var ffOpSrc))
-                        ffOperand = ResolveNode(ffOpSrc.uid, ffOpSrc.port, accessMap, partMap, callMap, wireFrom, 0);
-                    if (string.IsNullOrEmpty(ffOperand)) ffOperand = "?";
+            // 3c. Counters: CTU, CTD, CTUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            CounterParser.CollectOutputs(ctx, result);
 
-                    if (partName == "Sr")
-                    {
-                        // Sr: R1 tem prioridade sobre S
-                        // Portas no XML são minúsculas: "s", "r1", "q", "operand"
-                        string sIn  = "(sem ligação)";
-                        string r1In = "(sem ligação)";
-                        if (wireFrom.TryGetValue((uid, "s"),  out var sSrc))  sIn  = ResolveNode(sSrc.uid,  sSrc.port,  accessMap, partMap, callMap, wireFrom, 0);
-                        if (wireFrom.TryGetValue((uid, "r1"), out var r1Src)) r1In = ResolveNode(r1Src.uid, r1Src.port, accessMap, partMap, callMap, wireFrom, 0);
-                        result.Add($"SR flip-flop  {ffOperand}:  // R1 tem prioridade");
-                        result.Add($"  S  := {sIn}");
-                        result.Add($"  R1 := {r1In}");
-                    }
-                    else // Rs
-                    {
-                        // Rs: S1 tem prioridade sobre R
-                        // Portas no XML são minúsculas: "s1", "r", "q", "operand"
-                        string s1In = "(sem ligação)";
-                        string rIn  = "(sem ligação)";
-                        if (wireFrom.TryGetValue((uid, "s1"), out var s1Src)) s1In = ResolveNode(s1Src.uid, s1Src.port, accessMap, partMap, callMap, wireFrom, 0);
-                        if (wireFrom.TryGetValue((uid, "r"),  out var rSrc))  rIn  = ResolveNode(rSrc.uid,  rSrc.port,  accessMap, partMap, callMap, wireFrom, 0);
-                        result.Add($"RS flip-flop  {ffOperand}:  // S1 tem prioridade");
-                        result.Add($"  S1 := {s1In}");
-                        result.Add($"  R  := {rIn}");
-                    }
-                    continue;
-                }
+            // 3d. Math: Add, Sub, Mul, ... â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            MathParser.CollectOutputs(ctx, result);
 
-                // ── Coils normais ─────────────────────────────────────────────────
-                string operand = "";
-                if (wireFrom.TryGetValue((uid, "operand"), out var opSrc))
-                    operand = ResolveNode(opSrc.uid, opSrc.port, accessMap, partMap, callMap, wireFrom, 0);
+            // 3e. Move: Move, FillBlk, ... â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            MoveParser.CollectOutputs(ctx, result);
 
-                // Condition: resolve the "in" port of the coil
-                string condition = "";
-                if (wireFrom.TryGetValue((uid, "in"), out var inSrc))
-                {
-                    if (inSrc.uid != "PWR" && inSrc.uid != "OPEN")
-                        condition = ResolveNode(inSrc.uid, inSrc.port, accessMap, partMap, callMap, wireFrom, 0);
-                }
+            // 3f. Conversion: Convert, Round, ... â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            ConversionParser.CollectOutputs(ctx, result);
 
-                if (string.IsNullOrEmpty(operand)) continue;
+            // 3g. Word logic / Shift-Rotate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            WordLogicParser.CollectOutputs(ctx, result);
 
-                // Negated coil: check <Negated Name="operand"/> on the Part
-                bool negatedOp = kv.Value.Elements()
-                    .Any(e => e.Name.LocalName == "Negated" &&
-                              e.Attribute("Name")?.Value == "operand");
+            // 3h. String operations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            StringParser.CollectOutputs(ctx, result);
 
-                bool always = string.IsNullOrEmpty(condition);
-                switch (partName)
-                {
-                    case "SCoil": result.Add(always ? $"SET   {operand}"
-                                                    : $"IF {condition} THEN SET {operand}");              break;
-                    case "RCoil": result.Add(always ? $"RESET {operand}"
-                                                    : $"IF {condition} THEN RESET {operand}");            break;
-                    case "PCoil": result.Add(always ? $"SET ↑ {operand}"
-                                                    : $"IF ↑({condition}) THEN SET {operand}");           break;
-                    case "NCoil": result.Add(always ? $"SET ↓ {operand}"
-                                                    : $"IF ↓({condition}) THEN SET {operand}");           break;
-                    default:
-                        if (negatedOp)
-                            result.Add(always ? $"{operand} := NOT(entrada)"
-                                              : $"{operand} := NOT({condition})");
-                        else
-                            result.Add(always ? $"{operand} := TRUE"
-                                              : $"{operand} := {condition}");
-                        break;
-                }
-            }
+            // 3i. Program control: Calculate, TypeConvert â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            ProgramControlParser.CollectOutputs(ctx, result);
 
-            // 3b. Block CALLs — show instance name, all IN params and all OUT params
+            // 3j. FC/FB Calls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             foreach (var kv in callMap)
             {
-                var uid         = kv.Key;
-                var ci          = kv.Value.Descendants().FirstOrDefault(e => e.Name.LocalName == "CallInfo");
-                var blockName   = ci?.Attribute("Name")?.Value ?? "?";
-                var blockType   = ci?.Attribute("BlockType")?.Value ?? "";
-                var instName    = GetCallDisplayName(kv.Value);
-                // If instance name equals block name there's no named instance (inline)
-                var header      = instName != blockName
+                var uid       = kv.Key;
+                var ci        = kv.Value.Descendants().FirstOrDefault(e => e.Name.LocalName == "CallInfo");
+                var blockName = ci?.Attribute("Name")?.Value ?? "?";
+                var blockType = ci?.Attribute("BlockType")?.Value ?? "";
+                var instName  = FbdContext.GetCallInstanceName(kv.Value) ?? blockName;
+
+                var header = instName != blockName
                     ? $"CALL {blockName} [{blockType}]  instance: {instName}"
                     : $"CALL {blockName} [{blockType}]";
 
-                // EN condition
-                string enCond = "(PowerRail)";
-                if (wireFrom.TryGetValue((uid, "en"), out var enSrc))
-                    enCond = ResolveNode(enSrc.uid, enSrc.port, accessMap, partMap, callMap, wireFrom, 0);
-                if (enCond != "(PowerRail)" && enCond != "TRUE")
+                // CondiÃ§Ã£o EN
+                string enCond = "";
+                if (wireFrom.TryGetValue((uid, "en"), out var enSrc) &&
+                    enSrc.uid != "PWR" && enSrc.uid != "OPEN")
+                    enCond = ctx.ResolveNode(enSrc.uid, enSrc.port, 0);
+                if (!string.IsNullOrEmpty(enCond))
                     header = $"IF {enCond}: {header}";
 
                 result.Add(header);
 
-                // Parse parameter sections from CallInfo to know Input/Output/InOut
+                // SecÃ§Ãµes de parÃ¢metros (Input/Output/InOut)
                 var paramSections = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 if (ci != null)
                     foreach (var p in ci.Elements().Where(e => e.Name.LocalName == "Parameter"))
@@ -562,91 +503,85 @@ namespace TiaTracker.Core
                         if (pName != null) paramSections[pName] = pSec;
                     }
 
-                // Input and InOut parameters (wires INTO the call)
-                var inPorts = wireFrom.Keys
+                // ParÃ¢metros de entrada (wires para dentro do call)
+                foreach (var pk in wireFrom.Keys
                     .Where(k => k.uid == uid && k.port != "en" && k.port != "eno")
-                    .OrderBy(k => k.port)
-                    .ToList();
-                foreach (var pk in inPorts)
+                    .OrderBy(k => k.port))
                 {
-                    var src  = wireFrom[pk];
-                    var val  = ResolveNode(src.uid, src.port, accessMap, partMap, callMap, wireFrom, 0);
-                    var sec  = paramSections.TryGetValue(pk.port, out var s) ? s : "Input";
+                    var src   = wireFrom[pk];
+                    var val   = ctx.ResolveNode(src.uid, src.port, 0);
+                    var sec   = paramSections.TryGetValue(pk.port, out var s) ? s : "Input";
                     var label = sec == "InOut" ? "INOUT" : sec == "Output" ? "OUT" : "IN";
                     result.Add($"  {label,-5} {pk.port} := {val}");
                 }
 
-                // Output parameters (wires OUT of the call → where they go)
-                var outPorts = wireTo.Keys
+                // ParÃ¢metros de saÃ­da (wires para fora do call)
+                foreach (var pk in wireTo.Keys
                     .Where(k => k.uid == uid && k.port != "eno")
-                    .OrderBy(k => k.port)
-                    .ToList();
-                foreach (var pk in outPorts)
+                    .OrderBy(k => k.port))
                 {
-                    // Skip ports already shown as InOut above (they appear in both wireFrom and wireTo)
                     paramSections.TryGetValue(pk.port, out var pSec);
                     if (pSec == "InOut") continue;
-
                     foreach (var dst in wireTo[pk])
                     {
-                        string destName = ResolveDestination(dst.uid, dst.port, accessMap, partMap);
+                        var destName = ctx.ResolveDestination(dst.uid, dst.port);
                         result.Add($"  {"OUT",-5} {pk.port} => {destName}");
                     }
                 }
             }
 
-            // 3c. Parts whose OUTPUT goes to an Access (variable write without Coil)
-            //     Also handles EN-guarded operations: e.g. AND → ADD.en, ADD.out → variable
-            var seen3c = new HashSet<string>();
+            // 3k. Partes genÃ©ricas: saÃ­da vai diretamente para variÃ¡vel (sem Coil) â”€
+            // (Partes jÃ¡ tratadas pelos sub-parsers acima sÃ£o ignoradas aqui)
+            var seen3k = new HashSet<string>();
             foreach (var kv in partMap)
             {
+                var uid      = kv.Key;
                 var partName = kv.Value.Attribute("Name")?.Value ?? "";
-                bool isCoilType = partName == "Coil" || partName == "SCoil" || partName == "RCoil"
-                               || partName == "PCoil" || partName == "NCoil"
-                               || partName == "Sr"    || partName == "Rs";
-                if (isCoilType) continue;
 
-                var uid = kv.Key;
+                // Pular partes jÃ¡ tratadas por BitLogicParser.CollectOutputs
+                switch (partName)
+                {
+                    case "Coil": case "SCoil": case "RCoil": case "PCoil": case "NCoil":
+                    case "Sr":   case "Rs":                    case "R_TRIG": case "F_TRIG":                        continue;
+                }
 
-                // Resolve EN condition once for this Part
-                string enCond = "(PowerRail)";
-                if (wireFrom.TryGetValue((uid, "en"), out var enWire))
-                    enCond = ResolveNode(enWire.uid, enWire.port, accessMap, partMap, callMap, wireFrom, 0);
-                bool alwaysOn = enCond == "(PowerRail)" || enCond == "TRUE" || string.IsNullOrEmpty(enCond);
+                // CondiÃ§Ã£o EN
+                string enCond = "";
+                if (wireFrom.TryGetValue((uid, "en"), out var enWire) &&
+                    enWire.uid != "PWR" && enWire.uid != "OPEN")
+                    enCond = ctx.ResolveNode(enWire.uid, enWire.port, 0);
+                bool alwaysOn = string.IsNullOrEmpty(enCond);
 
-                // Check every output port of this Part
-                var outKeys = wireTo.Keys.Where(k => k.uid == uid).ToList();
-                foreach (var outKey in outKeys)
+                // Qualquer porta de saÃ­da que vai para uma variÃ¡vel (Access)
+                foreach (var outKey in wireTo.Keys.Where(k => k.uid == uid))
                 {
                     if (outKey.port == "eno") continue;
                     foreach (var dst in wireTo[outKey])
                     {
                         if (!accessMap.ContainsKey(dst.uid)) continue;
 
-                        var varName = GetVarName(accessMap[dst.uid]);
-                        var expr    = ResolvePart(uid, kv.Value, accessMap, partMap, callMap, wireFrom, 0);
-
-                        var line = alwaysOn
+                        var varName = ctx.GetVarName(accessMap[dst.uid]);
+                        var expr    = ctx.ResolveNode(uid, outKey.port, 0);
+                        var line    = alwaysOn
                             ? $"{varName} := {expr}"
                             : $"IF {enCond} THEN {varName} := {expr}";
 
-                        if (seen3c.Add(line))   // avoid duplicates
+                        if (seen3k.Add(line))
                             result.Add(line);
                     }
                 }
             }
 
-            // ── 4. Fallback: if no outputs found, describe the network raw ────
+            // â”€â”€ 4. Fallback: se sem saÃ­das, descreve a rede em bruto â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             if (result.Count == 0)
             {
-                // List all variables referenced
                 var seen = new HashSet<string>();
                 foreach (var acc in accessMap.Values)
                 {
                     var scope = acc.Attribute("Scope")?.Value ?? "";
                     if (scope != "GlobalVariable" && scope != "LocalVariable" &&
                         scope != "LiteralConstant" && scope != "TypedConstant") continue;
-                    var n = GetVarName(acc);
+                    var n = ctx.GetVarName(acc);
                     if (!string.IsNullOrEmpty(n) && n != "?" && seen.Add(n))
                         result.Add($"Var   {n}");
                 }
@@ -665,510 +600,7 @@ namespace TiaTracker.Core
 
             return result;
         }
-
-        /// <summary>Resolves the name/description of a wire DESTINATION element.</summary>
-        private static string ResolveDestination(string uid, string port,
-            Dictionary<string, XElement> accessMap,
-            Dictionary<string, XElement> partMap)
-        {
-            if (accessMap.TryGetValue(uid, out var acc))
-                return GetVarName(acc);
-            if (partMap.TryGetValue(uid, out var part))
-                return $"[{part.Attribute("Name")?.Value}].{port}";
-            return $"#{uid}.{port}";
-        }
-
-        /// <summary>Resolves a wire source node to a human-readable expression.</summary>
-        private static string ResolveNode(
-            string uid, string port,
-            Dictionary<string, XElement> accessMap,
-            Dictionary<string, XElement> partMap,
-            Dictionary<string, XElement> callMap,
-            Dictionary<(string uid, string port), (string uid, string port)> wireFrom,
-            int depth)
-        {
-            if (depth > 12) return "...";
-            if (uid == "PWR")  return "(PowerRail)";
-            if (uid == "OPEN") return "(sem entrada)";
-
-            // Access element = variable or constant
-            if (accessMap.TryGetValue(uid, out var acc))
-            {
-                var scope = acc.Attribute("Scope")?.Value;
-                if (scope == "LiteralConstant")
-                    return acc.Descendants()
-                        .FirstOrDefault(e => e.Name.LocalName == "ConstantValue")?.Value ?? "?";
-                if (scope == "TypedConstant")
-                    return acc.Descendants()
-                        .FirstOrDefault(e => e.Name.LocalName == "ConstantValue")?.Value ?? "?";
-                return GetVarName(acc);
-            }
-
-            // Part element = logic gate / function
-            if (partMap.TryGetValue(uid, out var part))
-                return ResolvePart(uid, part, accessMap, partMap, callMap, wireFrom, depth + 1);
-
-            // Call element = block call — return "InstanceName.OutputPort" or "BlockName.OutputPort"
-            if (callMap.TryGetValue(uid, out var call))
-            {
-                var displayName = GetCallDisplayName(call);
-                return !string.IsNullOrEmpty(port) ? $"{displayName}.{port}" : displayName;
-            }
-
-            return "?";
-        }
-
-        /// <summary>Returns "InstanceName" if available, otherwise "BlockName".</summary>
-        private static string GetCallDisplayName(XElement callEl)
-        {
-            var ci = callEl.Descendants().FirstOrDefault(e => e.Name.LocalName == "CallInfo");
-            if (ci == null) return "?";
-
-            var blockName = ci.Attribute("Name")?.Value ?? "?";
-
-            // Instance DB name lives in <Instance> or <CallInstance> child of CallInfo
-            var instEl = ci.Elements()
-                .FirstOrDefault(e => e.Name.LocalName == "Instance" ||
-                                     e.Name.LocalName == "CallInstance");
-            if (instEl != null)
-            {
-                var sym = instEl.Descendants()
-                    .FirstOrDefault(e => e.Name.LocalName == "Symbol");
-                if (sym != null)
-                {
-                    var instName = GetVarNameFromSymbol(sym);
-                    if (!string.IsNullOrEmpty(instName) && instName != "?")
-                        return instName;
-                }
-            }
-            return blockName;
-        }
-
-        /// <summary>Reads instance name from a timer/counter/function-block Part element.</summary>
-        private static string GetPartInstanceName(XElement part)
-        {
-            var instEl = part.Elements().FirstOrDefault(e => e.Name.LocalName == "Instance");
-            if (instEl == null) return null;
-            // Instance may contain Component directly or a Symbol hierarchy
-            var sym = instEl.Descendants().FirstOrDefault(e => e.Name.LocalName == "Symbol");
-            if (sym != null) return GetVarNameFromSymbol(sym);
-            var comp = instEl.Elements().FirstOrDefault(e => e.Name.LocalName == "Component");
-            return comp?.Attribute("Name")?.Value;
-        }
-
-        private static string GetVarNameFromSymbol(XElement sym)
-        {
-            var sb = new StringBuilder();
-            bool lastWasComponent = false;
-            foreach (var el in sym.Elements())
-            {
-                switch (el.Name.LocalName)
-                {
-                    case "Component":
-                        var compName  = el.Attribute("Name")?.Value ?? "";
-                        var hasQuotes = el.Elements().Any(e => e.Name.LocalName == "BooleanAttribute" &&
-                                                                e.Attribute("Name")?.Value == "HasQuotes" &&
-                                                                e.Value == "true");
-                        if (lastWasComponent && sb.Length > 0) sb.Append('.');
-                        sb.Append(hasQuotes ? $"\"{compName}\"" : compName);
-                        lastWasComponent = true;
-                        break;
-                    case "Token":
-                        sb.Append(el.Attribute("Text")?.Value ?? "");
-                        lastWasComponent = false;
-                        break;
-                    default:
-                        lastWasComponent = false;
-                        break;
-                }
-            }
-            return sb.Length > 0 ? sb.ToString() : "?";
-        }
-
-        private static string ResolvePart(
-            string uid, XElement part,
-            Dictionary<string, XElement> accessMap,
-            Dictionary<string, XElement> partMap,
-            Dictionary<string, XElement> callMap,
-            Dictionary<(string uid, string port), (string uid, string port)> wireFrom,
-            int depth)
-        {
-            var name = part.Attribute("Name")?.Value ?? "?";
-
-            // Get cardinality for multi-input gates
-            int card = 2;
-            var cardEl = part.Descendants()
-                .FirstOrDefault(e => e.Name.LocalName == "TemplateValue" &&
-                                     e.Attribute("Name")?.Value == "Card");
-            if (cardEl != null) int.TryParse(cardEl.Value, out card);
-
-            // Negated input ports: <Negated Name="in2" /> means that input is inverted
-            var negatedPorts = new HashSet<string>(
-                part.Elements().Where(e => e.Name.LocalName == "Negated")
-                    .Select(e => e.Attribute("Name")?.Value ?? "")
-                    .Where(s => s.Length > 0));
-
-            // Helper: resolve one named input port, applying negation if needed
-            string Inp(string portName)
-            {
-                if (!wireFrom.TryGetValue((uid, portName), out var s)) return "?";
-                var v = ResolveNode(s.uid, s.port, accessMap, partMap, callMap, wireFrom, depth);
-                return negatedPorts.Contains(portName) ? $"NOT({v})" : v;
-            }
-
-            switch (name)
-            {
-                // ── Boolean logic ──────────────────────────────────────────────
-                case "A":  // AND
-                {
-                    var inputs = CollectInputsWithNegation(uid, card, negatedPorts, accessMap, partMap, callMap, wireFrom, depth);
-                    if (inputs.Count == 0) return "AND(?)";
-                    for (int i = 0; i < inputs.Count; i++)
-                        if (inputs[i].Contains(" OR ") || inputs[i].Contains(" XOR "))
-                            inputs[i] = $"({inputs[i]})";
-                    return string.Join(" AND ", inputs);
-                }
-                case "O":  // OR
-                {
-                    var inputs = CollectInputsWithNegation(uid, card, negatedPorts, accessMap, partMap, callMap, wireFrom, depth);
-                    return inputs.Count == 0 ? "OR(?)" : string.Join(" OR ", inputs);
-                }
-                case "X":  // XOR
-                {
-                    var inputs = CollectInputsWithNegation(uid, card, negatedPorts, accessMap, partMap, callMap, wireFrom, depth);
-                    return inputs.Count == 0 ? "XOR(?)" : string.Join(" XOR ", inputs);
-                }
-                case "NOT":
-                    return $"NOT({Inp("in")})";
-
-                case "Contact":
-                {
-                    if (!wireFrom.TryGetValue((uid, "operand"), out var src)) return "Contact(?)";
-                    var v   = ResolveNode(src.uid, src.port, accessMap, partMap, callMap, wireFrom, depth);
-                    bool ng = part.Attribute("Negated")?.Value == "true" || negatedPorts.Contains("operand");
-                    var contactExpr = ng ? $"NOT({v})" : v;
-                    // LAD series: if "in" is not PowerRail, chain previous condition with AND
-                    if (wireFrom.TryGetValue((uid, "in"), out var inSrc) &&
-                        inSrc.uid != "PWR" && inSrc.uid != "OPEN")
-                    {
-                        var prev = ResolveNode(inSrc.uid, inSrc.port, accessMap, partMap, callMap, wireFrom, depth);
-                        if (!string.IsNullOrEmpty(prev) && prev != "(PowerRail)")
-                        {
-                            if (prev.Contains(" OR "))         prev         = $"({prev})";
-                            if (contactExpr.Contains(" OR "))  contactExpr  = $"({contactExpr})";
-                            return $"{prev} AND {contactExpr}";
-                        }
-                    }
-                    return contactExpr;
-                }
-                case "Coil": case "SCoil": case "RCoil": case "PCoil": case "NCoil":
-                    return "[COIL]"; // handled at a higher level
-
-                // ── Data move / fill ───────────────────────────────────────────
-                case "Move":
-                    return $"MOVE({Inp("in")})";
-                case "Swap":
-                    return $"SWAP({Inp("in")})";
-                case "Fill":
-                    return $"FILL(IN:={Inp("IN")}, COUNT:={Inp("COUNT")})";
-
-                // ── Arithmetic ─────────────────────────────────────────────────
-                case "Add": return $"({Inp("in1")} + {Inp("in2")})";
-                case "Sub": return $"({Inp("in1")} - {Inp("in2")})";
-                case "Mul": return $"({Inp("in1")} * {Inp("in2")})";
-                case "Div": return $"({Inp("in1")} / {Inp("in2")})";
-                case "Mod": return $"({Inp("in1")} MOD {Inp("in2")})";
-                case "Neg": return $"(-{Inp("in")})";
-                case "Abs": return $"ABS({Inp("in")})";
-
-                // ── Math functions ─────────────────────────────────────────────
-                case "Sqrt": return $"SQRT({Inp("in")})";
-                case "Ln":   return $"LN({Inp("in")})";
-                case "Log":  return $"LOG({Inp("in")})";
-                case "Exp":  return $"EXP({Inp("in")})";
-                case "Sin":  return $"SIN({Inp("in")})";
-                case "Cos":  return $"COS({Inp("in")})";
-                case "Tan":  return $"TAN({Inp("in")})";
-                case "Asin": return $"ASIN({Inp("in")})";
-                case "Acos": return $"ACOS({Inp("in")})";
-                case "Atan": return $"ATAN({Inp("in")})";
-                case "Frac": return $"FRAC({Inp("in")})";
-
-                // ── Comparison ─────────────────────────────────────────────────
-                case "CmpEQ": case "EQ":  return $"({Inp("in1")} = {Inp("in2")})";
-                case "CmpNE": case "NE":  return $"({Inp("in1")} <> {Inp("in2")})";
-                case "CmpGT": case "GT":  return $"({Inp("in1")} > {Inp("in2")})";
-                case "CmpGE": case "GE":  return $"({Inp("in1")} >= {Inp("in2")})";
-                case "CmpLT": case "LT":  return $"({Inp("in1")} < {Inp("in2")})";
-                case "CmpLE": case "LE":  return $"({Inp("in1")} <= {Inp("in2")})";
-                case "Cmp":
-                {
-                    // Generic comparator: try in1/in2, fall back to IN1/IN2
-                    var a = wireFrom.ContainsKey((uid, "in1")) ? Inp("in1") : Inp("IN1");
-                    var b = wireFrom.ContainsKey((uid, "in2")) ? Inp("in2") : Inp("IN2");
-                    return $"CMP({a}, {b})";
-                }
-
-                // ── Selection / Limit ──────────────────────────────────────────
-                case "Sel":    return $"SEL(G:={Inp("G")}, IN0:={Inp("IN0")}, IN1:={Inp("IN1")})";
-                case "Mux":    return $"MUX(K:={Inp("K")}, ...)";
-                case "DeMux":  return $"DEMUX(K:={Inp("K")}, IN:={Inp("IN")})";
-                case "Limit":  return $"LIMIT(MN:={Inp("MN")}, IN:={Inp("IN")}, MX:={Inp("MX")})";
-                case "Min":    return $"MIN({Inp("IN1")}, {Inp("IN2")})";
-                case "Max":    return $"MAX({Inp("IN1")}, {Inp("IN2")})";
-
-                // ── Conversion ────────────────────────────────────────────────
-                case "Convert":   return $"CONVERT({Inp("in")})";
-                case "Round":     return $"ROUND({Inp("in")})";
-                case "Trunc":     return $"TRUNC({Inp("in")})";
-                case "Ceiling":   return $"CEIL({Inp("in")})";
-                case "Floor":     return $"FLOOR({Inp("in")})";
-                case "Scale":     return $"SCALE(IN:={Inp("IN")})";
-                case "Normalize": return $"NORM(MIN:={Inp("MIN")}, VAL:={Inp("VAL")}, MAX:={Inp("MAX")})";
-
-                // ── Bit operations ────────────────────────────────────────────
-                case "And": return $"({Inp("in1")} & {Inp("in2")})";  // bitwise AND
-                case "Or":  return $"({Inp("in1")} | {Inp("in2")})";  // bitwise OR
-                case "Xor": return $"({Inp("in1")} XOR {Inp("in2")})";
-                case "Inv": return $"NOT({Inp("in")})";  // bitwise NOT
-                case "Shl": return $"SHL({Inp("in")}, {Inp("N")})";
-                case "Shr": return $"SHR({Inp("in")}, {Inp("N")})";
-                case "Rol": return $"ROL({Inp("in")}, {Inp("N")})";
-                case "Ror": return $"ROR({Inp("in")}, {Inp("N")})";
-
-                // ── String operations ─────────────────────────────────────────
-                case "Concat":  return $"CONCAT({Inp("IN1")}, {Inp("IN2")})";
-                case "Left":    return $"LEFT(IN:={Inp("IN")}, L:={Inp("L")})";
-                case "Right":   return $"RIGHT(IN:={Inp("IN")}, L:={Inp("L")})";
-                case "Mid":     return $"MID(IN:={Inp("IN")}, L:={Inp("L")}, P:={Inp("P")})";
-                case "Len":     return $"LEN({Inp("IN")})";
-                case "Find":    return $"FIND(IN1:={Inp("IN1")}, IN2:={Inp("IN2")})";
-                case "Replace": return $"REPLACE(IN:={Inp("IN")}, IN1:={Inp("IN1")}, L:={Inp("L")}, P:={Inp("P")})";
-                case "Insert":  return $"INSERT(IN:={Inp("IN")}, IN1:={Inp("IN1")}, P:={Inp("P")})";
-                case "Delete":  return $"DELETE(IN:={Inp("IN")}, L:={Inp("L")}, P:={Inp("P")})";
-
-                // ── SR/RS flip-flops — Q output usado como valor intermediário ─
-                // Portas no XML são minúsculas: s, r1, s1, r, q, operand
-                case "Sr":
-                {
-                    // Q output = valor atual do operand (a variável controlada)
-                    if (wireFrom.TryGetValue((uid, "operand"), out var srOp))
-                        return ResolveNode(srOp.uid, srOp.port, accessMap, partMap, callMap, wireFrom, depth + 1);
-                    return $"SR(S:={Inp("s")}, R1:={Inp("r1")}).Q";
-                }
-                case "Rs":
-                {
-                    if (wireFrom.TryGetValue((uid, "operand"), out var rsOp))
-                        return ResolveNode(rsOp.uid, rsOp.port, accessMap, partMap, callMap, wireFrom, depth + 1);
-                    return $"RS(S1:={Inp("s1")}, R:={Inp("r")}).Q";
-                }
-
-                // ── Edge detection ────────────────────────────────────────────
-                case "PBox": case "RLO_P": return $"P_TRIG({Inp("CLK")})";
-                case "NBox": case "RLO_N": return $"N_TRIG({Inp("CLK")})";
-                case "FP":  return $"P_TRIG({Inp("in")})";
-                case "FN":  return $"N_TRIG({Inp("in")})";
-
-                // ── Timers (with instance name from Part element) ─────────────────────
-                case "TON":
-                {
-                    var inst = GetPartInstanceName(part);
-                    var prefix = inst != null ? $"{inst}(" : "TON(";
-                    return $"{prefix}IN:={Inp("IN")}, PT:={Inp("PT")})";
-                }
-                case "TOF":
-                {
-                    var inst = GetPartInstanceName(part);
-                    var prefix = inst != null ? $"{inst}(" : "TOF(";
-                    return $"{prefix}IN:={Inp("IN")}, PT:={Inp("PT")})";
-                }
-                case "TP":
-                {
-                    var inst = GetPartInstanceName(part);
-                    var prefix = inst != null ? $"{inst}(" : "TP(";
-                    return $"{prefix}IN:={Inp("IN")}, PT:={Inp("PT")})";
-                }
-                case "TONR":
-                {
-                    var inst = GetPartInstanceName(part);
-                    var prefix = inst != null ? $"{inst}(" : "TONR(";
-                    return $"{prefix}IN:={Inp("IN")}, R:={Inp("R")}, PT:={Inp("PT")})";
-                }
-
-                // ── Counters (with instance name) ────────────────────────────────────
-                case "CTU":
-                {
-                    var inst = GetPartInstanceName(part);
-                    var prefix = inst != null ? $"{inst}(" : "CTU(";
-                    return $"{prefix}CU:={Inp("CU")}, R:={Inp("R")}, PV:={Inp("PV")})";
-                }
-                case "CTD":
-                {
-                    var inst = GetPartInstanceName(part);
-                    var prefix = inst != null ? $"{inst}(" : "CTD(";
-                    return $"{prefix}CD:={Inp("CD")}, LD:={Inp("LD")}, PV:={Inp("PV")})";
-                }
-                case "CTUD":
-                {
-                    var inst = GetPartInstanceName(part);
-                    var prefix = inst != null ? $"{inst}(" : "CTUD(";
-                    return $"{prefix}CU:={Inp("CU")}, CD:={Inp("CD")}, R:={Inp("R")}, LD:={Inp("LD")}, PV:={Inp("PV")})";
-                }
-
-                // ── Calculate (expression box) ────────────────────────────────────────
-                case "Calculate":
-                case "CALCULATE":
-                {
-                    // The expression is stored in a TemplateValue named "Expression"
-                    var exprEl = part.Descendants()
-                        .FirstOrDefault(e => e.Name.LocalName == "TemplateValue" &&
-                                             e.Attribute("Name")?.Value == "Expression");
-                    var expr = exprEl?.Value ?? "?";
-                    // Collect all named inputs
-                    var calcInputs = wireFrom.Keys
-                        .Where(k => k.uid == uid)
-                        .OrderBy(k => k.port)
-                        .Select(k => { var s = wireFrom[k]; var v = ResolveNode(s.uid, s.port, accessMap, partMap, callMap, wireFrom, depth); return $"{k.port}:={v}"; });
-                    return $"CALCULATE({expr}; {string.Join(", ", calcInputs)})";
-                }
-
-                // ── Type conversion with explicit type ───────────────────────────────
-                case "TypeConvert":
-                case "CONV":
-                {
-                    var tplEl = part.Descendants()
-                        .FirstOrDefault(e => e.Name.LocalName == "TemplateValue" &&
-                                             e.Attribute("Name")?.Value == "srcType");
-                    var srcType = tplEl?.Value ?? "";
-                    var dstEl = part.Descendants()
-                        .FirstOrDefault(e => e.Name.LocalName == "TemplateValue" &&
-                                             e.Attribute("Name")?.Value == "dstType");
-                    var dstType = dstEl?.Value ?? "";
-                    return string.IsNullOrEmpty(srcType)
-                        ? $"CONVERT({Inp("in")})"
-                        : $"{srcType}_TO_{dstType}({Inp("in")})";
-                }
-
-                // ── Generic fallback (unknown Part) ───────────────────────────
-                default:
-                {
-                    // Collect ALL connected inputs dynamically — don't assume cardinality
-                    var connectedPorts = wireFrom.Keys
-                        .Where(k => k.uid == uid)
-                        .OrderBy(k => k.port)
-                        .ToList();
-
-                    if (connectedPorts.Count == 0)
-                        return name;
-
-                    var sb = new StringBuilder();
-                    sb.Append(name).Append('(');
-                    bool first = true;
-                    foreach (var pk in connectedPorts)
-                    {
-                        if (!first) sb.Append(", ");
-                        var src = wireFrom[pk];
-                        var v   = ResolveNode(src.uid, src.port, accessMap, partMap, callMap, wireFrom, depth);
-                        if (negatedPorts.Contains(pk.port)) v = $"NOT({v})";
-                        sb.Append($"{pk.port}:={v}");
-                        first = false;
-                    }
-                    sb.Append(')');
-                    return sb.ToString();
-                }
-            }
-        }
-
-        private static List<string> CollectInputsWithNegation(
-            string uid, int card,
-            HashSet<string> negatedPorts,
-            Dictionary<string, XElement> accessMap,
-            Dictionary<string, XElement> partMap,
-            Dictionary<string, XElement> callMap,
-            Dictionary<(string uid, string port), (string uid, string port)> wireFrom,
-            int depth)
-        {
-            var inputs = new List<string>();
-            for (int i = 1; i <= card; i++)
-            {
-                var portName = $"in{i}";
-                if (wireFrom.TryGetValue((uid, portName), out var src))
-                {
-                    var val = ResolveNode(src.uid, src.port, accessMap, partMap, callMap, wireFrom, depth);
-                    if (negatedPorts.Contains(portName)) val = $"NOT({val})";
-                    inputs.Add(val);
-                }
-            }
-            if (inputs.Count == 0 && wireFrom.TryGetValue((uid, "in"), out var sinSrc))
-            {
-                var val = ResolveNode(sinSrc.uid, sinSrc.port, accessMap, partMap, callMap, wireFrom, depth);
-                if (negatedPorts.Contains("in")) val = $"NOT({val})";
-                inputs.Add(val);
-            }
-            return inputs;
-        }
-
-        private static string GetVarName(XElement access)
-        {
-            var sym = access.Elements()
-                .FirstOrDefault(e => e.Name.LocalName == "Symbol");
-            if (sym == null)
-                sym = access.Descendants().FirstOrDefault(e => e.Name.LocalName == "Symbol");
-            if (sym == null) return "?";
-
-            var sb = new StringBuilder();
-            bool lastWasComponent = false;
-            foreach (var el in sym.Elements())
-            {
-                switch (el.Name.LocalName)
-                {
-                    case "Component":
-                    {
-                        var compName  = el.Attribute("Name")?.Value ?? "";
-                        var modifier  = el.Attribute("AccessModifier")?.Value ?? "";
-                        var hasQuotes = el.Elements()
-                            .Any(e => e.Name.LocalName == "BooleanAttribute" &&
-                                      e.Attribute("Name")?.Value == "HasQuotes" &&
-                                      e.Value == "true");
-                        // In FBD XML, consecutive Components have no "." Token between them —
-                        // add it automatically so DB.Member renders as "DB.Member" not "DBMember"
-                        if (lastWasComponent && sb.Length > 0)
-                            sb.Append('.');
-                        sb.Append(hasQuotes ? $"\"{compName}\"" : compName);
-                        // Handle array indices: Component children that are Access elements
-                        if (modifier == "Array" || el.Elements().Any(e => e.Name.LocalName == "Access"))
-                        {
-                            var indices = el.Elements()
-                                .Where(e => e.Name.LocalName == "Access")
-                                .Select(idxAcc =>
-                                {
-                                    var cv = idxAcc.Descendants()
-                                        .FirstOrDefault(e2 => e2.Name.LocalName == "ConstantValue")?.Value;
-                                    if (cv != null) return cv;
-                                    // Symbolic index (variable)
-                                    var idxSym = idxAcc.Descendants().FirstOrDefault(e2 => e2.Name.LocalName == "Symbol");
-                                    return idxSym != null ? GetVarNameFromSymbol(idxSym) : "?";
-                                })
-                                .ToList();
-                            if (indices.Count > 0)
-                                sb.Append($"[{string.Join(", ", indices)}]");
-                        }
-                        lastWasComponent = true;
-                        break;
-                    }
-                    case "Token":
-                        sb.Append(el.Attribute("Text")?.Value ?? "");
-                        lastWasComponent = false;
-                        break;
-                    default:
-                        lastWasComponent = false;
-                        break;
-                }
-            }
-            return sb.Length > 0 ? sb.ToString() : "?";
-        }
-
-        // ── SCL reconstruction from tokenized XML ────────────────────────────
+        // â”€â”€ SCL reconstruction from tokenized XML â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         private static string ReconstructScl(XElement structuredText)
         {
@@ -1245,7 +677,7 @@ namespace TiaTracker.Core
                                         .FirstOrDefault(e2 => e2.Name.LocalName == "ConstantValue")?.Value;
                                     if (cv != null) return cv;
                                     var idxSym = idxAcc.Descendants().FirstOrDefault(e2 => e2.Name.LocalName == "Symbol");
-                                    return idxSym != null ? GetVarNameFromSymbol(idxSym) : "?";
+                                    return idxSym != null ? FbdContext.GetVarNameFromSymbol(idxSym) : "?";
                                 })
                                 .ToList();
                             if (indices.Count > 0)
@@ -1261,7 +693,7 @@ namespace TiaTracker.Core
             return sb.ToString();
         }
 
-        // ── Helpers ──────────────────────────────────────────────────────────
+        // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         private static string GetBlockType(PlcBlock block)
         {
@@ -1290,7 +722,7 @@ namespace TiaTracker.Core
             return null;
         }
 
-        // ── Tag Tables ────────────────────────────────────────────────────────
+        // â”€â”€ Tag Tables â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         public List<TagTableInfo> ReadAllTagTables()
         {
@@ -1349,7 +781,7 @@ namespace TiaTracker.Core
             finally { try { File.Delete(tempFile); } catch { } }
         }
 
-        // ── UDTs (PLC Data Types) ─────────────────────────────────────────────
+        // â”€â”€ UDTs (PLC Data Types) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
         public List<UdtInfo> ReadAllUDTs()
         {
