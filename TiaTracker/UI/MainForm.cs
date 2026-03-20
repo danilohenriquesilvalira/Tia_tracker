@@ -37,25 +37,26 @@ namespace TiaTracker.UI
         private List<TagTableInfo> _tagTables = new List<TagTableInfo>();
         private List<UdtInfo>      _udts      = new List<UdtInfo>();
 
-        // ── Theme ─────────────────────────────────────────────────────────────
-        static readonly Color BG      = Color.FromArgb( 18,  18,  20);
-        static readonly Color PANEL   = Color.FromArgb( 28,  28,  34);
-        static readonly Color TREE_BG = Color.FromArgb( 22,  22,  28);
-        static readonly Color LOG_BG  = Color.FromArgb( 14,  14,  18);
-        static readonly Color C_OB    = Color.FromArgb( 78, 201, 176);
-        static readonly Color C_FB    = Color.FromArgb(197, 134, 192);
-        static readonly Color C_FC    = Color.FromArgb( 86, 156, 214);
-        static readonly Color C_DB    = Color.FromArgb(220, 160,  80);
-        static readonly Color C_TAGS  = Color.FromArgb(220, 110, 110);
-        static readonly Color C_UDT   = Color.FromArgb(150, 200, 130);
-        static readonly Color C_NET   = Color.FromArgb(106, 153,  85);
-        static readonly Color C_IFACE = Color.FromArgb(156, 156, 156);
-        static readonly Color C_TEXT  = Color.FromArgb(212, 212, 212);
-        static readonly Color C_OK    = Color.FromArgb( 80, 200,  80);
-        static readonly Color C_ERR   = Color.FromArgb(220,  70,  70);
-        static readonly Color C_GOLD  = Color.FromArgb(220, 180,  60);
-        static readonly Color C_GROUP = Color.FromArgb(110, 110, 125);
-        static readonly Color C_BLUE  = Color.FromArgb(  0, 122, 204);
+        // ── Theme — VS Code Dark+ ──────────────────────────────────────────────
+        static readonly Color BG      = Color.FromArgb( 30,  30,  30);   // #1E1E1E
+        static readonly Color PANEL   = Color.FromArgb( 37,  37,  38);   // #252526
+        static readonly Color TREE_BG = Color.FromArgb( 37,  37,  38);   // #252526
+        static readonly Color LOG_BG  = Color.FromArgb( 30,  30,  30);   // #1E1E1E
+        static readonly Color C_OB    = Color.FromArgb( 86, 156, 214);   // #569CD6 keyword blue
+        static readonly Color C_FB    = Color.FromArgb( 78, 201, 176);   // #4EC9B0 type teal
+        static readonly Color C_FC    = Color.FromArgb(220, 220, 170);   // #DCDCAA function yellow
+        static readonly Color C_DB    = Color.FromArgb(206, 145, 120);   // #CE9178 string orange
+        static readonly Color C_TAGS  = Color.FromArgb(156, 220, 254);   // #9CDCFE variable blue
+        static readonly Color C_UDT   = Color.FromArgb(197, 134, 192);   // #C586C0 purple
+        static readonly Color C_NET   = Color.FromArgb(106, 153,  85);   // #6A9955 comment green
+        static readonly Color C_IFACE = Color.FromArgb(128, 128, 128);   // #808080 grey
+        static readonly Color C_TEXT  = Color.FromArgb(212, 212, 212);   // #D4D4D4 default text
+        static readonly Color C_OK    = Color.FromArgb(106, 153,  85);   // #6A9955 green
+        static readonly Color C_ERR   = Color.FromArgb(244,  71,  71);   // #F44747 red
+        static readonly Color C_GOLD  = Color.FromArgb(215, 186, 125);   // #D7BA7D device nodes
+        static readonly Color C_GROUP = Color.FromArgb(128, 128, 128);   // #808080 grey
+        static readonly Color C_BLUE  = Color.FromArgb(  0, 120, 212);   // #0078D4 accent blue
+        static readonly Color C_SEL   = Color.FromArgb( 38,  79, 120);   // #264F78 selection
 
         // ── Constructor ───────────────────────────────────────────────────────
         public MainForm() { BuildUI(); }
@@ -72,44 +73,30 @@ namespace TiaTracker.UI
             Font          = new Font("Segoe UI", 9f);
             Icon          = MakeIcon();
 
-            // ── Header com gradiente pintado ──────────────────────────────────
-            var header = new Panel { Dock = DockStyle.Top, Height = 54 };
+            // ── Header — barra escura simples estilo VS Code ──────────────────
+            var header = new Panel { Dock = DockStyle.Top, Height = 48, BackColor = Color.FromArgb(37, 37, 38) };
             header.Paint += (s, e) =>
             {
                 var rc = header.ClientRectangle;
-                if (rc.Width <= 0 || rc.Height <= 0) return;   // guard against zero-size
-                using var br = new LinearGradientBrush(rc,
-                    Color.FromArgb(28, 24, 48), Color.FromArgb(18, 18, 26),
-                    LinearGradientMode.Horizontal);
-                e.Graphics.FillRectangle(br, rc);
-                using var pen = new Pen(Color.FromArgb(80, 60, 160), 2);
+                if (rc.Width <= 0 || rc.Height <= 0) return;
+                using var pen = new Pen(Color.FromArgb(68, 68, 68), 1);
                 e.Graphics.DrawLine(pen, 0, rc.Bottom - 1, rc.Right, rc.Bottom - 1);
             };
 
-            var pnlHeaderLeft = new Panel { Dock = DockStyle.Left, Width = 54, BackColor = Color.Transparent };
+            var pnlHeaderLeft = new Panel { Dock = DockStyle.Left, Width = 50, BackColor = Color.Transparent };
             pnlHeaderLeft.Paint += (s, e) =>
             {
                 var g  = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-
-                // círculo centrado no painel
                 int cx = pnlHeaderLeft.Width  / 2;
                 int cy = pnlHeaderLeft.Height / 2;
-                int r  = 18;
+                int r  = 16;
                 var circleRect = new Rectangle(cx - r, cy - r, r * 2, r * 2);
-
                 if (circleRect.Width <= 0 || circleRect.Height <= 0) return;
-
-                using var br = new LinearGradientBrush(circleRect, C_BLUE, Color.FromArgb(100, 40, 180), 135f);
+                using var br = new SolidBrush(C_BLUE);
                 g.FillEllipse(br, circleRect);
-
-                // "D" centrado com StringFormat — garante alinhamento perfeito
-                using var f  = new Font("Segoe UI", 15f, FontStyle.Bold);
-                using var sf = new StringFormat
-                {
-                    Alignment     = StringAlignment.Center,
-                    LineAlignment = StringAlignment.Center
-                };
+                using var f  = new Font("Segoe UI", 14f, FontStyle.Bold);
+                using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
                 using var sb = new SolidBrush(Color.White);
                 g.DrawString("D", f, sb, new RectangleF(circleRect.X, circleRect.Y, circleRect.Width, circleRect.Height), sf);
             };
@@ -118,18 +105,18 @@ namespace TiaTracker.UI
             {
                 Text      = "DANILO TRACKER",
                 Dock      = DockStyle.Left,
-                Width     = 210,
-                Font      = new Font("Segoe UI", 13f, FontStyle.Bold),
-                ForeColor = Color.White,
+                Width     = 200,
+                Font      = new Font("Segoe UI", 12f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(212, 212, 212),
                 TextAlign = ContentAlignment.MiddleLeft,
                 BackColor = Color.Transparent
             };
             var lblSub = new Label
             {
-                Text      = "TIA Portal V18  ·  Leitura offline de projeto PLC  ·  Exportação XML & Markdown para IA",
+                Text      = "TIA Portal V18  ·  Leitura offline de projeto PLC  ·  Exportação XML & Markdown",
                 Dock      = DockStyle.Fill,
                 Font      = new Font("Segoe UI", 8.5f),
-                ForeColor = Color.FromArgb(140, 130, 180),
+                ForeColor = Color.FromArgb(128, 128, 128),
                 TextAlign = ContentAlignment.MiddleLeft,
                 BackColor = Color.Transparent
             };
@@ -141,9 +128,9 @@ namespace TiaTracker.UI
             var toolbar = new Panel
             {
                 Dock      = DockStyle.Top,
-                Height    = 50,
-                BackColor = Color.FromArgb(24, 24, 32),
-                Padding   = new Padding(10, 8, 10, 8)
+                Height    = 46,
+                BackColor = Color.FromArgb(37, 37, 38),
+                Padding   = new Padding(10, 6, 10, 6)
             };
 
             var tbl = new TableLayoutPanel
@@ -166,7 +153,7 @@ namespace TiaTracker.UI
             {
                 Text      = "Projeto:",
                 Dock      = DockStyle.Fill,
-                ForeColor = Color.FromArgb(160, 155, 190),
+                ForeColor = Color.FromArgb(128, 128, 128),
                 TextAlign = ContentAlignment.MiddleRight,
                 Font      = new Font("Segoe UI", 8.5f)
             };
@@ -174,24 +161,24 @@ namespace TiaTracker.UI
             _txtPath = new TextBox
             {
                 Dock        = DockStyle.Fill,
-                BackColor   = Color.FromArgb(18, 18, 28),
-                ForeColor   = Color.FromArgb(200, 195, 230),
+                BackColor   = Color.FromArgb(60, 60, 60),
+                ForeColor   = Color.FromArgb(212, 212, 212),
                 BorderStyle = BorderStyle.FixedSingle,
                 Font        = new Font("Consolas", 8.8f),
                 Text        = @"C:\Users\Admin\Desktop\C#_PLC\C#_PLC.ap18",
                 Margin      = new Padding(6, 0, 6, 0)
             };
 
-            _btnBrowse  = MkBtn("···",              38, Color.FromArgb(42, 42, 60));
+            _btnBrowse  = MkBtn("···",              38, Color.FromArgb(60, 60, 60));
             _btnRun     = MkBtn("▶  Conectar e Ler", 174, C_BLUE);
-            _btnSaveXml = MkBtn("💾  XML",          138, Color.FromArgb(50, 58, 75));
-            _btnSaveMd  = MkBtn("🤖  Exportar para IA", 158, Color.FromArgb(28, 72, 42));
+            _btnSaveXml = MkBtn("Salvar XML",        138, Color.FromArgb(60, 60, 60));
+            _btnSaveMd  = MkBtn("Exportar para IA",  158, Color.FromArgb(60, 60, 60));
 
             _btnRun.Font        = new Font("Segoe UI", 9.5f, FontStyle.Bold);
             _btnRun.Margin      = new Padding(4, 0, 4, 0);
             _btnSaveXml.Enabled = false;
             _btnSaveMd.Enabled  = false;
-            _btnSaveMd.FlatAppearance.BorderColor = Color.FromArgb(50, 130, 70);
+            _btnSaveMd.FlatAppearance.BorderColor = Color.FromArgb(68, 68, 68);
 
             _btnBrowse.Click  += (s, e) => BrowseProject();
             _btnRun.Click     += async (s, e) => await RunAsync();
@@ -199,10 +186,10 @@ namespace TiaTracker.UI
             _btnSaveMd.Click  += (s, e) => SaveMd();
 
             // hover nos botões
-            AddHover(_btnBrowse,  Color.FromArgb(55, 55, 80),   Color.FromArgb(42, 42, 60));
-            AddHover(_btnSaveXml, Color.FromArgb(60, 72, 95),   Color.FromArgb(50, 58, 75));
-            AddHover(_btnSaveMd,  Color.FromArgb(38, 95, 55),   Color.FromArgb(28, 72, 42));
-            AddHover(_btnRun,     Color.FromArgb(30, 140, 230),  C_BLUE);
+            AddHover(_btnBrowse,  Color.FromArgb(80, 80, 80),   Color.FromArgb(60, 60, 60));
+            AddHover(_btnSaveXml, Color.FromArgb(80, 80, 80),   Color.FromArgb(60, 60, 60));
+            AddHover(_btnSaveMd,  Color.FromArgb(80, 80, 80),   Color.FromArgb(60, 60, 60));
+            AddHover(_btnRun,     Color.FromArgb(14, 99, 156),   C_BLUE);
 
             tbl.Controls.Add(lblPath,     0, 0);
             tbl.Controls.Add(_txtPath,    1, 0);
@@ -214,22 +201,24 @@ namespace TiaTracker.UI
 
             _progress = new ProgressBar
             {
-                Dock                  = DockStyle.Top,
-                Height                = 2,
-                Style                 = ProgressBarStyle.Marquee,
-                MarqueeAnimationSpeed = 0,
-                BackColor             = Color.FromArgb(24, 24, 32)
+                Dock      = DockStyle.Top,
+                Height    = 3,
+                Style     = ProgressBarStyle.Continuous,
+                Minimum   = 0,
+                Maximum   = 100,
+                Value     = 0,
+                BackColor = Color.FromArgb(37, 37, 38)
             };
 
             // ── StatusStrip ───────────────────────────────────────────────────
-            var strip = new StatusStrip { BackColor = Color.FromArgb(16, 16, 24), SizingGrip = false };
+            var strip = new StatusStrip { BackColor = Color.FromArgb(0, 122, 204), SizingGrip = false };
             _lblStatus = new ToolStripStatusLabel
             {
                 Text      = "  Pronto. Selecione um projeto e clique em  ▶ Conectar e Ler.",
-                ForeColor = Color.FromArgb(150, 145, 180),
+                ForeColor = Color.White,
                 Spring    = true
             };
-            _lblStats = new ToolStripStatusLabel { Text = "", ForeColor = C_GROUP, Spring = false };
+            _lblStats = new ToolStripStatusLabel { Text = "", ForeColor = Color.FromArgb(200, 235, 255), Spring = false };
             strip.Items.AddRange(new ToolStripItem[] { _lblStatus, _lblStats });
 
             // ── Outer split ───────────────────────────────────────────────────
@@ -237,47 +226,47 @@ namespace TiaTracker.UI
             {
                 Dock          = DockStyle.Fill,
                 Orientation   = Orientation.Vertical,
-                SplitterWidth = 3,
-                BackColor     = Color.FromArgb(35, 35, 45),
+                SplitterWidth = 1,
+                BackColor     = Color.FromArgb(68, 68, 68),
             };
 
             // ── Left panel ────────────────────────────────────────────────────
             var treeTitle = new Panel
             {
                 Dock      = DockStyle.Top,
-                Height    = 30,
-                BackColor = Color.FromArgb(20, 20, 30)
+                Height    = 28,
+                BackColor = PANEL
             };
             treeTitle.Paint += (s, e) =>
             {
-                e.Graphics.FillRectangle(new SolidBrush(Color.FromArgb(20, 20, 30)), treeTitle.ClientRectangle);
+                e.Graphics.FillRectangle(new SolidBrush(PANEL), treeTitle.ClientRectangle);
                 using var f = new Font("Segoe UI", 7.5f, FontStyle.Bold);
-                using var b = new SolidBrush(Color.FromArgb(100, 95, 140));
-                e.Graphics.DrawString("  ESTRUTURA DO PROJETO", f, b, 2, 9);
+                using var b = new SolidBrush(Color.FromArgb(128, 128, 128));
+                e.Graphics.DrawString("  EXPLORADOR", f, b, 2, 8);
             };
 
             _txtSearch = new TextBox
             {
                 Dock        = DockStyle.Top,
-                Height      = 28,
-                BackColor   = Color.FromArgb(20, 20, 32),
-                ForeColor   = Color.FromArgb(130, 125, 165),
+                Height      = 26,
+                BackColor   = Color.FromArgb(60, 60, 60),
+                ForeColor   = Color.FromArgb(128, 128, 128),
                 BorderStyle = BorderStyle.None,
                 Font        = new Font("Segoe UI", 9f),
-                Text        = "  🔍  Filtrar blocos...",
+                Text        = "  Filtrar blocos...",
                 Padding     = new Padding(4, 0, 0, 0)
             };
             _txtSearch.GotFocus += (s, e) =>
             {
-                if (_txtSearch.Text.Contains("Filtrar")) { _txtSearch.Text = ""; _txtSearch.ForeColor = Color.White; }
+                if (_txtSearch.Text.Contains("Filtrar")) { _txtSearch.Text = ""; _txtSearch.ForeColor = Color.FromArgb(212, 212, 212); }
             };
             _txtSearch.LostFocus += (s, e) =>
             {
-                if (string.IsNullOrWhiteSpace(_txtSearch.Text)) { _txtSearch.Text = "  🔍  Filtrar blocos..."; _txtSearch.ForeColor = Color.FromArgb(130, 125, 165); }
+                if (string.IsNullOrWhiteSpace(_txtSearch.Text)) { _txtSearch.Text = "  Filtrar blocos..."; _txtSearch.ForeColor = Color.FromArgb(128, 128, 128); }
             };
             _txtSearch.TextChanged += (s, e) => FilterTree(_txtSearch.Text);
 
-            var searchBorder = new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Color.FromArgb(45, 45, 65) };
+            var searchBorder = new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Color.FromArgb(68, 68, 68) };
 
             _tree = new TreeView
             {
@@ -309,8 +298,8 @@ namespace TiaTracker.UI
             {
                 Dock          = DockStyle.Fill,
                 Orientation   = Orientation.Horizontal,
-                SplitterWidth = 3,
-                BackColor     = Color.FromArgb(35, 35, 45),
+                SplitterWidth = 1,
+                BackColor     = Color.FromArgb(68, 68, 68),
                 FixedPanel    = FixedPanel.Panel2
             };
 
@@ -318,14 +307,14 @@ namespace TiaTracker.UI
             _detailHeader = new Panel
             {
                 Dock      = DockStyle.Top,
-                Height    = 52,
-                BackColor = Color.FromArgb(24, 22, 40),
+                Height    = 48,
+                BackColor = Color.FromArgb(37, 37, 38),
                 Visible   = false
             };
             _detailHeader.Paint += (s, e) =>
             {
                 var rc = _detailHeader.ClientRectangle;
-                using var pen = new Pen(Color.FromArgb(70, 60, 120), 1);
+                using var pen = new Pen(Color.FromArgb(68, 68, 68), 1);
                 e.Graphics.DrawLine(pen, 0, rc.Bottom - 1, rc.Right, rc.Bottom - 1);
             };
             _lblDetailTitle = new Label
@@ -339,10 +328,10 @@ namespace TiaTracker.UI
             };
             _lblDetailMeta = new Label
             {
-                Location  = new Point(14, 30),
+                Location  = new Point(14, 28),
                 Size      = new Size(800, 16),
                 Font      = new Font("Segoe UI", 8f),
-                ForeColor = Color.FromArgb(140, 130, 175),
+                ForeColor = Color.FromArgb(128, 128, 128),
                 BackColor = Color.Transparent,
                 AutoSize  = false
             };
@@ -369,11 +358,11 @@ namespace TiaTracker.UI
             // Log panel
             var logHeader = new Label
             {
-                Text      = "  LOG DE LIGAÇÃO",
+                Text      = "  OUTPUT",
                 Dock      = DockStyle.Top,
                 Height    = 22,
-                BackColor = Color.FromArgb(18, 18, 28),
-                ForeColor = Color.FromArgb(90, 85, 120),
+                BackColor = Color.FromArgb(37, 37, 38),
+                ForeColor = Color.FromArgb(128, 128, 128),
                 Font      = new Font("Segoe UI", 7.5f, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleLeft
             };
@@ -381,7 +370,7 @@ namespace TiaTracker.UI
             {
                 Dock        = DockStyle.Fill,
                 BackColor   = LOG_BG,
-                ForeColor   = Color.FromArgb(120, 115, 150),
+                ForeColor   = Color.FromArgb(128, 128, 128),
                 Font        = new Font("Consolas", 8.5f),
                 ReadOnly    = true,
                 BorderStyle = BorderStyle.None,
@@ -424,13 +413,13 @@ namespace TiaTracker.UI
             bool selected = (e.State & TreeNodeStates.Selected) != 0;
 
             // fundo
-            Color bgColor = selected ? Color.FromArgb(45, 42, 78) : TREE_BG;
+            Color bgColor = selected ? C_SEL : TREE_BG;
             g.FillRectangle(new SolidBrush(bgColor), new Rectangle(0, rc.Y, _tree.Width, rc.Height));
 
-            // linha de hover simulada (selected border accent)
+            // borda esquerda no item selecionado
             if (selected)
             {
-                using var pen = new Pen(Color.FromArgb(100, 80, 200), 2);
+                using var pen = new Pen(C_BLUE, 2);
                 g.DrawLine(pen, 0, rc.Y, 0, rc.Bottom);
             }
 
@@ -439,7 +428,7 @@ namespace TiaTracker.UI
             {
                 int midY  = rc.Y + rc.Height / 2;
                 int arrowX = rc.X - 14;
-                using var pen = new Pen(Color.FromArgb(90, 85, 130), 1);
+                using var pen = new Pen(Color.FromArgb(128, 128, 128), 1);
                 if (node.IsExpanded)
                 {
                     g.DrawLine(pen, arrowX - 3, midY - 2, arrowX,     midY + 3);
@@ -510,14 +499,14 @@ namespace TiaTracker.UI
             {
                 Text        = text,
                 Dock        = DockStyle.Fill,
-                MinimumSize = new Size(width, 28),
-                BackColor   = bg ?? Color.FromArgb(48, 48, 58),
-                ForeColor   = Color.White,
+                MinimumSize = new Size(width, 26),
+                BackColor   = bg ?? Color.FromArgb(60, 60, 60),
+                ForeColor   = Color.FromArgb(212, 212, 212),
                 FlatStyle   = FlatStyle.Flat,
                 Cursor      = Cursors.Hand,
                 Margin      = Padding.Empty
             };
-            b.FlatAppearance.BorderColor = Color.FromArgb(70, 70, 95);
+            b.FlatAppearance.BorderColor = Color.FromArgb(68, 68, 68);
             return b;
         }
 
@@ -548,7 +537,7 @@ namespace TiaTracker.UI
             _rtbLog.Clear();
             _tree.Nodes.Clear();
             _detailHeader.Visible = false;
-            _progress.MarqueeAnimationSpeed = 30;
+            SetProgress(0);
             SetStatus("A preparar...", Color.Silver);
             SetStats("");
 
@@ -560,31 +549,40 @@ namespace TiaTracker.UI
                 try
                 {
                     SetStatus("A conectar ao TIA Portal...", Color.Silver);
+                    SetProgress(5);
                     _conn?.Dispose();
                     _conn = new TiaConnection(path);
 
                     if (!_conn.Connect())
                     {
                         SetStatus("Falha na ligação!", C_ERR);
+                        SetProgress(0);
                         return;
                     }
+                    SetProgress(20);
 
                     var reader = new ProjectReader(_conn.Project);
 
                     SetStatus("A ler blocos  (OB / FB / FC / DB)...", Color.Silver);
                     _blocks = reader.ReadAllBlocks();
+                    SetProgress(55);
 
                     SetStatus("A ler Tag Tables...", Color.Silver);
                     _tagTables = reader.ReadAllTagTables();
+                    SetProgress(70);
 
                     SetStatus("A ler Tipos de Dados (UDTs)...", Color.Silver);
                     _udts = reader.ReadAllUDTs();
+                    SetProgress(80);
 
                     SetStatus("A construir árvore...", Color.Silver);
                     Invoke((Action)BuildTree);
+                    SetProgress(88);
 
                     _xmlResult = BuildXml(_blocks, _tagTables, _udts, path);
+                    SetProgress(94);
                     _mdResult  = BuildMarkdown(_blocks, _tagTables, _udts, path);
+                    SetProgress(100);
 
                     int obC = _blocks.Count(b => b.Type == "OB");
                     int fbC = _blocks.Count(b => b.Type == "FB");
@@ -605,7 +603,7 @@ namespace TiaTracker.UI
 
             _running = false;
             _btnRun.Enabled = true;
-            _progress.MarqueeAnimationSpeed = 0;
+            SetProgress(0);
         }
 
         // ── Build Tree ────────────────────────────────────────────────────────
@@ -623,8 +621,8 @@ namespace TiaTracker.UI
             {
                 var devNode = new TreeNode($"  {dev}")
                 {
-                    ForeColor = C_GOLD,
-                    NodeFont  = new Font("Segoe UI", 10f, FontStyle.Bold)
+                    ForeColor = Color.FromArgb(212, 212, 212),
+                    NodeFont  = new Font("Segoe UI", 9f, FontStyle.Bold)
                 };
 
                 var devBlocks = _blocks.Where(b => b.Device == dev).ToList();
@@ -704,7 +702,7 @@ namespace TiaTracker.UI
             {
                 var folderBlocks = blocks.Where(b => b.FolderPath == folder ||
                                                      b.FolderPath.StartsWith(folder + "/")).ToList();
-                var folderNode = MakeFolderNode($"  📁  {folder}  ({folderBlocks.Count})", folderBlocks.Count);
+                var folderNode = MakeFolderNode($"  {folder}  ({folderBlocks.Count})", folderBlocks.Count);
                 AddFolderChildren(folderNode, folderBlocks, folder);
                 parent.Nodes.Add(folderNode);
             }
@@ -734,7 +732,7 @@ namespace TiaTracker.UI
                 var subPath   = currentPath + "/" + sub;
                 var subBlocks = blocks.Where(b => b.FolderPath == subPath ||
                                                   b.FolderPath.StartsWith(subPath + "/")).ToList();
-                var subNode   = MakeFolderNode($"  📁  {sub}  ({subBlocks.Count})", subBlocks.Count);
+                var subNode   = MakeFolderNode($"  {sub}  ({subBlocks.Count})", subBlocks.Count);
                 AddFolderChildren(subNode, subBlocks, subPath);
                 parent.Nodes.Add(subNode);
             }
@@ -748,10 +746,10 @@ namespace TiaTracker.UI
         }
 
         private TreeNode MakeFolderNode(string text, int count) =>
-            new TreeNode(text) { ForeColor = Color.FromArgb(180, 170, 100), NodeFont = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
+            new TreeNode(text) { ForeColor = Color.FromArgb(197, 134, 192), NodeFont = new Font("Segoe UI", 8.5f) };
 
         private TreeNode MakeGroupNode(string text) =>
-            new TreeNode(text) { ForeColor = C_GROUP, NodeFont = new Font("Segoe UI", 8.5f, FontStyle.Bold) };
+            new TreeNode(text) { ForeColor = Color.FromArgb(128, 128, 128), NodeFont = new Font("Segoe UI", 8f) };
 
         private void AddBlockGroup(TreeNode parent, List<BlockInfo> blocks, string type, string label, Color color)
         {
@@ -1296,6 +1294,12 @@ namespace TiaTracker.UI
         {
             if (InvokeRequired) { Invoke((Action)(() => SetStats(text))); return; }
             _lblStats.Text = text;
+        }
+
+        private void SetProgress(int pct)
+        {
+            if (InvokeRequired) { Invoke((Action)(() => SetProgress(pct))); return; }
+            _progress.Value = Math.Max(0, Math.Min(100, pct));
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)

@@ -515,8 +515,9 @@ namespace TiaTracker.Core
                 }
             }
 
-            // 3c. Parts whose OUTPUT goes directly to an Access (variable write without Coil)
-            //     e.g. MOVE instruction output → variable
+            // 3c. Parts whose OUTPUT goes to an Access (variable write without Coil)
+            //     Also handles EN-guarded operations: e.g. AND → ADD.en, ADD.out → variable
+            var seen3c = new HashSet<string>();
             foreach (var kv in partMap)
             {
                 var partName = kv.Value.Attribute("Name")?.Value ?? "";
@@ -526,7 +527,13 @@ namespace TiaTracker.Core
 
                 var uid = kv.Key;
 
-                // Check if any output port of this Part connects to an Access
+                // Resolve EN condition once for this Part
+                string enCond = "(PowerRail)";
+                if (wireFrom.TryGetValue((uid, "en"), out var enWire))
+                    enCond = ResolveNode(enWire.uid, enWire.port, accessMap, partMap, callMap, wireFrom, 0);
+                bool alwaysOn = enCond == "(PowerRail)" || enCond == "TRUE" || string.IsNullOrEmpty(enCond);
+
+                // Check every output port of this Part
                 var outKeys = wireTo.Keys.Where(k => k.uid == uid).ToList();
                 foreach (var outKey in outKeys)
                 {
@@ -534,10 +541,16 @@ namespace TiaTracker.Core
                     foreach (var dst in wireTo[outKey])
                     {
                         if (!accessMap.ContainsKey(dst.uid)) continue;
-                        // A Part output feeds directly into a variable → it's an assignment
+
                         var varName = GetVarName(accessMap[dst.uid]);
                         var expr    = ResolvePart(uid, kv.Value, accessMap, partMap, callMap, wireFrom, 0);
-                        result.Add($"{varName} := {expr}");
+
+                        var line = alwaysOn
+                            ? $"{varName} := {expr}"
+                            : $"IF {enCond} THEN {varName} := {expr}";
+
+                        if (seen3c.Add(line))   // avoid duplicates
+                            result.Add(line);
                     }
                 }
             }
