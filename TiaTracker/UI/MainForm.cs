@@ -163,7 +163,7 @@ namespace TiaTracker.UI
             var tbl = new TableLayoutPanel
             {
                 Dock        = DockStyle.Fill,
-                ColumnCount = 6,
+                ColumnCount = 7,
                 RowCount    = 1,
                 Margin      = Padding.Empty,
                 Padding     = Padding.Empty,
@@ -175,6 +175,7 @@ namespace TiaTracker.UI
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 178));   // run
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 142));   // xml
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 162));   // IA
+            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 152));   // criar bloco
 
             var lblPath = new Label
             {
