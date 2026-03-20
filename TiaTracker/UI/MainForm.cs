@@ -413,10 +413,10 @@ namespace TiaTracker.UI
             bool selected = (e.State & TreeNodeStates.Selected) != 0;
 
             // fundo
-            Color bgColor = selected ? C_SEL : TREE_BG;
-            g.FillRectangle(new SolidBrush(bgColor), new Rectangle(0, rc.Y, _tree.Width, rc.Height));
+            g.FillRectangle(new SolidBrush(selected ? C_SEL : TREE_BG),
+                new Rectangle(0, rc.Y, _tree.Width, rc.Height));
 
-            // borda esquerda no item selecionado
+            // borda esquerda na seleção
             if (selected)
             {
                 using var pen = new Pen(C_BLUE, 2);
@@ -426,7 +426,7 @@ namespace TiaTracker.UI
             // sinal +/- (expand/collapse)
             if (node.Nodes.Count > 0)
             {
-                int midY  = rc.Y + rc.Height / 2;
+                int midY   = rc.Y + rc.Height / 2;
                 int arrowX = rc.X - 14;
                 using var pen = new Pen(Color.FromArgb(128, 128, 128), 1);
                 if (node.IsExpanded)
@@ -441,26 +441,121 @@ namespace TiaTracker.UI
                 }
             }
 
-            // badge colorido por tipo (só folhas com Tag)
-            int textX = rc.X + 4;
-            if (node.Tag != null)
+            // ícone + offset de texto
+            int iconX = rc.X + 2;
+            int textX = rc.X + 21;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            if (node.Tag is BlockInfo bi)
             {
-                Color badge = node.Tag is BlockInfo b  ? (b.Type == "OB" ? C_OB : b.Type == "FB" ? C_FB : b.Type == "FC" ? C_FC : C_DB) :
-                              node.Tag is TagTableInfo ? C_TAGS : C_UDT;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                using var br = new SolidBrush(badge);
-                g.FillRectangle(br, rc.X + 2, rc.Y + 7, 5, rc.Height - 14);
-                g.SmoothingMode = SmoothingMode.Default;
-                textX = rc.X + 12;
+                Color col = bi.Type == "OB" ? C_OB : bi.Type == "FB" ? C_FB : bi.Type == "FC" ? C_FC : C_DB;
+                DrawIconDocument(g, iconX, rc.Y, rc.Height, col);
             }
+            else if (node.Tag is TagTableInfo)
+                DrawIconDocument(g, iconX, rc.Y, rc.Height, C_TAGS);
+            else if (node.Tag is UdtInfo)
+                DrawIconDocument(g, iconX, rc.Y, rc.Height, C_UDT);
+            else if (node.Tag is string kind)
+            {
+                if (kind == "device")
+                    DrawIconDevice(g, iconX, rc.Y, rc.Height);
+                else if (kind == "folder")
+                    DrawIconFolder(g, iconX, rc.Y, rc.Height, Color.FromArgb(220, 186, 90), node.IsExpanded);
+                else if (kind.StartsWith("group:"))
+                {
+                    var t = kind.Substring(6);
+                    Color col = t == "OB" ? C_OB : t == "FB" ? C_FB : t == "FC" ? C_FC :
+                                t == "DB" ? C_DB : t == "tags" ? C_TAGS : C_UDT;
+                    DrawIconGroup(g, iconX, rc.Y, rc.Height, col);
+                }
+                else textX = rc.X + 4;
+            }
+            else textX = rc.X + 4;
+
+            g.SmoothingMode = SmoothingMode.Default;
 
             // texto
             var textColor = node.ForeColor == Color.Empty ? C_TEXT : node.ForeColor;
             var font      = node.NodeFont ?? _tree.Font;
             TextRenderer.DrawText(g, node.Text, font,
-                new Rectangle(textX, rc.Y, rc.Width - textX + rc.X, rc.Height),
+                new Rectangle(textX, rc.Y, rc.Right - textX, rc.Height),
                 textColor,
                 TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPrefix);
+        }
+
+        // ── Ícones do TreeView (GDI+) ─────────────────────────────────────────
+        private static void DrawIconDocument(Graphics g, int x, int y, int h, Color color)
+        {
+            int midY = y + h / 2;
+            int iw = 11, ih = 13, fold = 3;
+            int ix = x, iy = midY - ih / 2;
+            // fundo do documento
+            using var bodyBr = new SolidBrush(Color.FromArgb(210, 210, 210));
+            g.FillRectangle(bodyBr, ix, iy, iw, ih);
+            // canto dobrado
+            using var foldBr = new SolidBrush(Color.FromArgb(150, 150, 150));
+            var foldPts = new Point[] {
+                new Point(ix + iw - fold, iy),
+                new Point(ix + iw, iy + fold),
+                new Point(ix + iw - fold, iy + fold)
+            };
+            g.FillPolygon(foldBr, foldPts);
+            // borda esquerda colorida
+            using var edgeBr = new SolidBrush(color);
+            g.FillRectangle(edgeBr, ix, iy, 3, ih);
+        }
+
+        private static void DrawIconFolder(Graphics g, int x, int y, int h, Color color, bool expanded)
+        {
+            int midY = y + h / 2;
+            int iw = 14, ih = 10;
+            int ix = x, iy = midY - ih / 2;
+            Color dark = Color.FromArgb(
+                (int)(color.R * 0.72f), (int)(color.G * 0.72f), (int)(color.B * 0.72f));
+            Color body = expanded
+                ? Color.FromArgb((int)(color.R * 0.9f), (int)(color.G * 0.9f), (int)(color.B * 0.9f))
+                : color;
+            // aba superior
+            using var tabBr = new SolidBrush(dark);
+            g.FillRectangle(tabBr, ix, iy, 6, 3);
+            // corpo
+            using var bodyBr = new SolidBrush(body);
+            g.FillRectangle(bodyBr, ix, iy + 2, iw, ih - 2);
+            // linha brilhante no topo quando aberto
+            if (expanded)
+            {
+                using var hlBr = new SolidBrush(Color.FromArgb(
+                    Math.Min(255, color.R + 60), Math.Min(255, color.G + 50), Math.Min(255, color.B + 30)));
+                g.FillRectangle(hlBr, ix, iy + 2, iw, 2);
+            }
+        }
+
+        private static void DrawIconDevice(Graphics g, int x, int y, int h)
+        {
+            int midY = y + h / 2;
+            int iw = 14, ih = 11;
+            int ix = x, iy = midY - ih / 2;
+            using var bodyBr = new SolidBrush(Color.FromArgb(75, 75, 80));
+            g.FillRectangle(bodyBr, ix, iy, iw, ih);
+            using var borderPen = new Pen(Color.FromArgb(160, 160, 165), 1);
+            g.DrawRectangle(borderPen, ix, iy, iw - 1, ih - 1);
+            // slots verticais
+            using var slotPen = new Pen(Color.FromArgb(180, 180, 185), 1);
+            for (int i = 1; i <= 3; i++)
+                g.DrawLine(slotPen, ix + i * 3, iy + 2, ix + i * 3, iy + ih - 3);
+        }
+
+        private static void DrawIconGroup(Graphics g, int x, int y, int h, Color color)
+        {
+            int midY = y + h / 2;
+            int ix = x + 1;
+            // colchete { com linha horizontal
+            using var pen = new Pen(color, 1.5f);
+            g.DrawLine(pen, ix + 3, midY - 4, ix + 1, midY - 2);
+            g.DrawLine(pen, ix + 1, midY - 2, ix,     midY);
+            g.DrawLine(pen, ix,     midY,     ix + 1, midY + 2);
+            g.DrawLine(pen, ix + 1, midY + 2, ix + 3, midY + 4);
+            g.DrawLine(pen, ix + 4, midY,     ix + 12, midY);
         }
 
         // ── Hover helper ──────────────────────────────────────────────────────
@@ -619,10 +714,11 @@ namespace TiaTracker.UI
 
             foreach (var dev in devices)
             {
-                var devNode = new TreeNode($"  {dev}")
+                var devNode = new TreeNode($" {dev}")
                 {
                     ForeColor = Color.FromArgb(212, 212, 212),
-                    NodeFont  = new Font("Segoe UI", 9f, FontStyle.Bold)
+                    NodeFont  = new Font("Segoe UI", 9f, FontStyle.Bold),
+                    Tag       = "device"
                 };
 
                 var devBlocks = _blocks.Where(b => b.Device == dev).ToList();
@@ -639,20 +735,20 @@ namespace TiaTracker.UI
                 {
                     // Sem pastas — agrupar por tipo (comportamento anterior)
                     // Ordem fixa: OB → FB → FC → DB → iDB
-                    AddBlockGroup(devNode, devBlocks, "OB",  "Blocos de Organização  [OB]", C_OB);
-                    AddBlockGroup(devNode, devBlocks, "FB",  "Blocos de Função  [FB]",      C_FB);
-                    AddBlockGroup(devNode, devBlocks, "FC",  "Funções  [FC]",               C_FC);
-                    AddBlockGroup(devNode, devBlocks, "DB",  "Blocos de Dados  [DB]",       C_DB);
-                    AddBlockGroup(devNode, devBlocks, "iDB", "Instance DBs  [iDB]",         C_DB);
+                    AddBlockGroup(devNode, devBlocks, "OB",  "Organização  [OB]",  C_OB);
+                    AddBlockGroup(devNode, devBlocks, "FB",  "Função  [FB]",       C_FB);
+                    AddBlockGroup(devNode, devBlocks, "FC",  "Funções  [FC]",      C_FC);
+                    AddBlockGroup(devNode, devBlocks, "DB",  "Dados  [DB]",        C_DB);
+                    AddBlockGroup(devNode, devBlocks, "iDB", "Instance DBs",       C_DB);
                 }
 
                 // Tag Tables
                 var devTags = _tagTables.Where(t => t.Device == dev).OrderBy(t => t.Name).ToList();
                 if (devTags.Count > 0)
                 {
-                    var grp = MakeGroupNode($"  Tag Tables  ({devTags.Count})");
+                    var grp = MakeGroupNode($" Tag Tables  ({devTags.Count})", "tags");
                     foreach (var tt in devTags)
-                        grp.Nodes.Add(new TreeNode($"  {tt.Name}  ({tt.Tags.Count} tags)")
+                        grp.Nodes.Add(new TreeNode($" {tt.Name}  ({tt.Tags.Count} tags)")
                             { ForeColor = C_TAGS, Tag = tt });
                     devNode.Nodes.Add(grp);
                 }
@@ -661,9 +757,9 @@ namespace TiaTracker.UI
                 var devUdts = _udts.Where(u => u.Device == dev).OrderBy(u => u.Name).ToList();
                 if (devUdts.Count > 0)
                 {
-                    var grp = MakeGroupNode($"  Tipos de Dados — UDTs  ({devUdts.Count})");
+                    var grp = MakeGroupNode($" UDTs  ({devUdts.Count})", "udt");
                     foreach (var udt in devUdts)
-                        grp.Nodes.Add(new TreeNode($"  {udt.Name}")
+                        grp.Nodes.Add(new TreeNode($" {udt.Name}")
                             { ForeColor = C_UDT, Tag = udt });
                     devNode.Nodes.Add(grp);
                 }
@@ -742,24 +838,34 @@ namespace TiaTracker.UI
         {
             var col  = b.Type == "OB" ? C_OB : b.Type == "FB" ? C_FB : b.Type == "FC" ? C_FC : C_DB;
             var nets = b.Networks.Count > 0 ? $"  [{b.Networks.Count}]" : "";
-            return new TreeNode($"  {b.Type}{b.Number}  —  {b.Name}{nets}") { ForeColor = col, Tag = b };
+            return new TreeNode($" {b.Type}{b.Number}  —  {b.Name}{nets}") { ForeColor = col, Tag = b };
         }
 
         private TreeNode MakeFolderNode(string text, int count) =>
-            new TreeNode(text) { ForeColor = Color.FromArgb(197, 134, 192), NodeFont = new Font("Segoe UI", 8.5f) };
+            new TreeNode(text)
+            {
+                ForeColor = Color.FromArgb(220, 186, 90),
+                NodeFont  = new Font("Segoe UI", 8.5f),
+                Tag       = "folder"
+            };
 
-        private TreeNode MakeGroupNode(string text) =>
-            new TreeNode(text) { ForeColor = Color.FromArgb(128, 128, 128), NodeFont = new Font("Segoe UI", 8f) };
+        private TreeNode MakeGroupNode(string text, string type = "DB") =>
+            new TreeNode(text)
+            {
+                ForeColor = Color.FromArgb(180, 180, 180),
+                NodeFont  = new Font("Segoe UI", 8.5f),
+                Tag       = $"group:{type}"
+            };
 
         private void AddBlockGroup(TreeNode parent, List<BlockInfo> blocks, string type, string label, Color color)
         {
             var list = blocks.Where(b => b.Type == type).OrderBy(b => b.Number).ToList();
             if (list.Count == 0) return;
-            var grp = MakeGroupNode($"  {label}  ({list.Count})");
+            var grp = MakeGroupNode($" {label}  ({list.Count})", type);
             foreach (var b in list)
             {
-                var nets = b.Networks.Count > 0 ? $"  [{b.Networks.Count} redes]" : "";
-                grp.Nodes.Add(new TreeNode($"  {type}{b.Number}  —  {b.Name}{nets}")
+                var nets = b.Networks.Count > 0 ? $"  [{b.Networks.Count}]" : "";
+                grp.Nodes.Add(new TreeNode($" {type}{b.Number}  —  {b.Name}{nets}")
                     { ForeColor = color, Tag = b });
             }
             parent.Nodes.Add(grp);
