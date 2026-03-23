@@ -26,4 +26,18 @@
     </Reference>
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Icons\icon_ob.png" />
+    <EmbeddedResource Include="Resources\Icons\icon_fb.png" />
+    <EmbeddedResource Include="Resources\Icons\icon_fc.png" />
+    <EmbeddedResource Include="Resources\Icons\icon_db.png" />
+    <EmbeddedResource Include="Resources\Icons\icon_tags.png" />
+    <EmbeddedResource Include="Resources\Icons\icon_udt.png" />
+    <EmbeddedResource Include="Resources\Icons\icon_device.png" />
+    <EmbeddedResource Include="Resources\Icons\icon_hardware.png" />
+    <EmbeddedResource Include="Resources\Icons\icon_folder_FC_FB_DB.png" />
+    <EmbeddedResource Include="Resources\Icons\icon_folder_tag_tables.png" />
+    <EmbeddedResource Include="Resources\Icons\icon_folder_Udt.png" />
+  </ItemGroup>
+
 </Project>

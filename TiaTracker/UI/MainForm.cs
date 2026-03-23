@@ -38,10 +38,15 @@ namespace TiaTracker.UI
         private List<BlockInfo>    _blocks    = new List<BlockInfo>();
         private List<TagTableInfo> _tagTables = new List<TagTableInfo>();
         private List<UdtInfo>      _udts      = new List<UdtInfo>();
+        private List<HwDeviceInfo> _hwDevices = new List<HwDeviceInfo>();
         private Dictionary<string, List<ProjectReader.CallEdge>> _callGraph = new Dictionary<string, List<ProjectReader.CallEdge>>();
 
-        // Tag especial para o nó de grafo na TreeView
-        private class CallGraphTag { public string Device; }
+        // Tags especiais para nós da TreeView
+        private class CallGraphTag  { public string Device; }
+        private class HardwareTag   { public string Device; }
+
+        // Ícones PNG embebidos
+        private readonly Dictionary<string, Bitmap> _ico = new Dictionary<string, Bitmap>();
 
         // ── Win32 ─────────────────────────────────────────────────────────────
         [System.Runtime.InteropServices.DllImport("uxtheme.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
@@ -96,7 +101,33 @@ namespace TiaTracker.UI
         static readonly Color C_SEL   = Color.FromArgb( 31,  45,  63);   // #1F2D3F  seleção
 
         // ── Constructor ───────────────────────────────────────────────────────
-        public MainForm() { BuildUI(); }
+        public MainForm() { BuildUI(); LoadIcons(); }
+
+        private void LoadIcons()
+        {
+            var asm = System.Reflection.Assembly.GetExecutingAssembly();
+            void Load(string key, string resource)
+            {
+                try
+                {
+                    using var s = asm.GetManifestResourceStream(resource);
+                    if (s != null) _ico[key] = new Bitmap(s);
+                }
+                catch { }
+            }
+            const string base_ = "TiaTracker.Resources.Icons.";
+            Load("OB",          base_ + "icon_ob.png");
+            Load("FB",          base_ + "icon_fb.png");
+            Load("FC",          base_ + "icon_fc.png");
+            Load("DB",          base_ + "icon_db.png");
+            Load("TAG",         base_ + "icon_tags.png");
+            Load("UDT",         base_ + "icon_udt.png");
+            Load("DEVICE",      base_ + "icon_device.png");
+            Load("HARDWARE",    base_ + "icon_hardware.png");
+            Load("FOLDER",      base_ + "icon_folder_FC_FB_DB.png");
+            Load("FOLDER_TAGS", base_ + "icon_folder_tag_tables.png");
+            Load("FOLDER_UDT",  base_ + "icon_folder_Udt.png");
+        }
 
         // ── UI Construction ───────────────────────────────────────────────────
         private void BuildUI()
@@ -509,36 +540,68 @@ namespace TiaTracker.UI
 
             // ícone + offset de texto
             int iconX = rc.X + 2;
-            int textX = rc.X + 21;
+            int textX = rc.X + 24;
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
 
             if (node.Tag is BlockInfo bi)
             {
-                Color col = bi.Type == "OB" ? C_OB : bi.Type == "FB" ? C_FB : bi.Type == "FC" ? C_FC : C_DB;
-                DrawIconDocument(g, iconX, rc.Y, rc.Height, col);
+                var key = bi.Type == "OB" ? "OB" : bi.Type == "FB" ? "FB" : bi.Type == "FC" ? "FC" : "DB";
+                if (_ico.TryGetValue(key, out var img))
+                    DrawPng(g, img, iconX, rc.Y, rc.Height);
+                else
+                {
+                    Color col = bi.Type == "OB" ? C_OB : bi.Type == "FB" ? C_FB : bi.Type == "FC" ? C_FC : C_DB;
+                    DrawIconDocument(g, iconX, rc.Y, rc.Height, col, bi.Type);
+                }
             }
             else if (node.Tag is TagTableInfo)
-                DrawIconDocument(g, iconX, rc.Y, rc.Height, C_TAGS);
+            {
+                if (_ico.TryGetValue("TAG", out var img)) DrawPng(g, img, iconX, rc.Y, rc.Height);
+                else DrawIconDocument(g, iconX, rc.Y, rc.Height, C_TAGS, "TAG");
+            }
             else if (node.Tag is UdtInfo)
-                DrawIconDocument(g, iconX, rc.Y, rc.Height, C_UDT);
+            {
+                if (_ico.TryGetValue("UDT", out var img)) DrawPng(g, img, iconX, rc.Y, rc.Height);
+                else DrawIconDocument(g, iconX, rc.Y, rc.Height, C_UDT, "UDT");
+            }
+            else if (node.Tag is HardwareTag)
+            {
+                if (_ico.TryGetValue("HARDWARE", out var img)) DrawPng(g, img, iconX, rc.Y, rc.Height);
+                else DrawIconHardware(g, iconX, rc.Y, rc.Height, C_OB);
+            }
+            else if (node.Tag is CallGraphTag)
+                DrawIconCallGraph(g, iconX, rc.Y, rc.Height, C_GOLD);
             else if (node.Tag is string kind)
             {
                 if (kind == "device")
-                    DrawIconDevice(g, iconX, rc.Y, rc.Height);
+                {
+                    if (_ico.TryGetValue("DEVICE", out var img)) DrawPng(g, img, iconX, rc.Y, rc.Height);
+                    else DrawIconDevice(g, iconX, rc.Y, rc.Height);
+                }
                 else if (kind == "folder")
-                    DrawIconFolder(g, iconX, rc.Y, rc.Height, C_GOLD, node.IsExpanded);
+                {
+                    if (_ico.TryGetValue("FOLDER", out var img)) DrawPng(g, img, iconX, rc.Y, rc.Height);
+                    else DrawIconFolder(g, iconX, rc.Y, rc.Height, C_GOLD, node.IsExpanded);
+                }
                 else if (kind.StartsWith("group:"))
                 {
                     var t = kind.Substring(6);
-                    Color col = t == "OB" ? C_OB : t == "FB" ? C_FB : t == "FC" ? C_FC :
-                                t == "DB" ? C_DB : t == "tags" ? C_TAGS : C_UDT;
-                    DrawIconGroup(g, iconX, rc.Y, rc.Height, col);
+                    string fKey = t == "tags" ? "FOLDER_TAGS" : t == "udt" ? "FOLDER_UDT" : "FOLDER";
+                    if (_ico.TryGetValue(fKey, out var img)) DrawPng(g, img, iconX, rc.Y, rc.Height);
+                    else
+                    {
+                        Color col = t == "OB" ? C_OB : t == "FB" ? C_FB : t == "FC" ? C_FC :
+                                    t == "DB" ? C_DB : t == "tags" ? C_TAGS : C_UDT;
+                        DrawIconGroup(g, iconX, rc.Y, rc.Height, col);
+                    }
                 }
                 else textX = rc.X + 4;
             }
             else textX = rc.X + 4;
 
             g.SmoothingMode = SmoothingMode.Default;
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Default;
 
             // texto
             var textColor = node.ForeColor == Color.Empty ? C_TEXT : node.ForeColor;
@@ -550,78 +613,204 @@ namespace TiaTracker.UI
         }
 
         // ── Ícones do TreeView (GDI+) ─────────────────────────────────────────
-        private static void DrawIconDocument(Graphics g, int x, int y, int h, Color color)
+
+        /// <summary>Desenha um PNG centrado verticalmente no item da TreeView.</summary>
+        private static void DrawPng(Graphics g, Bitmap img, int x, int y, int itemHeight)
+        {
+            int sz   = Math.Min(20, itemHeight - 4);
+            int offY = y + (itemHeight - sz) / 2;
+            g.DrawImage(img, x, offY, sz, sz);
+        }
+
+        /// <summary>Documento com borda colorida e etiqueta de tipo (OB/FB/FC/DB/TAG/UDT).</summary>
+        private static void DrawIconDocument(Graphics g, int x, int y, int h, Color color, string label = null)
         {
             int midY = y + h / 2;
-            int iw = 11, ih = 13, fold = 3;
+            int iw = 12, ih = 14, fold = 4;
             int ix = x, iy = midY - ih / 2;
-            // fundo do documento
-            using var bodyBr = new SolidBrush(Color.FromArgb(55, 62, 80));
+
+            // corpo
+            using var bodyBr = new SolidBrush(Color.FromArgb(50, 57, 76));
             g.FillRectangle(bodyBr, ix, iy, iw, ih);
+
             // canto dobrado
-            using var foldBr = new SolidBrush(Color.FromArgb(80, 90, 112));
-            var foldPts = new Point[] {
+            using var foldBr = new SolidBrush(Color.FromArgb(72, 82, 105));
+            g.FillPolygon(foldBr, new Point[] {
                 new Point(ix + iw - fold, iy),
-                new Point(ix + iw, iy + fold),
+                new Point(ix + iw,        iy + fold),
                 new Point(ix + iw - fold, iy + fold)
-            };
-            g.FillPolygon(foldBr, foldPts);
+            });
+
             // borda esquerda colorida
             using var edgeBr = new SolidBrush(color);
             g.FillRectangle(edgeBr, ix, iy, 3, ih);
+
+            // etiqueta de tipo
+            if (!string.IsNullOrEmpty(label))
+            {
+                using var tf = new Font("Segoe UI", 4.5f, FontStyle.Bold);
+                var clamp = Color.FromArgb(210, Math.Min(255, color.R + 30),
+                                                Math.Min(255, color.G + 30),
+                                                Math.Min(255, color.B + 30));
+                TextRenderer.DrawText(g, label,
+                    tf, new Rectangle(ix + 3, iy + 2, iw - 4, ih - 4), clamp,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
         }
 
+        /// <summary>Pasta com estado aberta/fechada claramente distinto.</summary>
         private static void DrawIconFolder(Graphics g, int x, int y, int h, Color color, bool expanded)
         {
             int midY = y + h / 2;
             int iw = 14, ih = 10;
             int ix = x, iy = midY - ih / 2;
-            Color dark = Color.FromArgb(
-                (int)(color.R * 0.72f), (int)(color.G * 0.72f), (int)(color.B * 0.72f));
-            Color body = expanded
-                ? Color.FromArgb((int)(color.R * 0.9f), (int)(color.G * 0.9f), (int)(color.B * 0.9f))
-                : color;
-            // aba superior
-            using var tabBr = new SolidBrush(dark);
-            g.FillRectangle(tabBr, ix, iy, 6, 3);
+
+            Color tabColor  = Color.FromArgb((int)(color.R * 0.68f), (int)(color.G * 0.68f), (int)(color.B * 0.55f));
+            Color bodyColor = expanded
+                ? Color.FromArgb(Math.Min(255, color.R + 15), Math.Min(255, color.G + 12), (int)(color.B * 0.7f))
+                : Color.FromArgb((int)(color.R * 0.88f), (int)(color.G * 0.82f), (int)(color.B * 0.55f));
+
+            // aba com canto arredondado
+            using var tabBr = new SolidBrush(tabColor);
+            g.FillRectangle(tabBr, ix, iy, 7, 4);
+            g.FillRectangle(tabBr, ix + 7, iy + 1, 3, 3); // canto da aba
+
             // corpo
-            using var bodyBr = new SolidBrush(body);
-            g.FillRectangle(bodyBr, ix, iy + 2, iw, ih - 2);
-            // linha brilhante no topo quando aberto
+            using var bodyBr = new SolidBrush(bodyColor);
+            g.FillRectangle(bodyBr, ix, iy + 3, iw, ih - 3);
+
             if (expanded)
             {
+                // linha brilhante no topo — indica aberto
                 using var hlBr = new SolidBrush(Color.FromArgb(
-                    Math.Min(255, color.R + 60), Math.Min(255, color.G + 50), Math.Min(255, color.B + 30)));
-                g.FillRectangle(hlBr, ix, iy + 2, iw, 2);
+                    Math.Min(255, color.R + 70), Math.Min(255, color.G + 60), Math.Min(255, color.B + 20)));
+                g.FillRectangle(hlBr, ix, iy + 3, iw, 2);
+
+                // pequenos "documentos" visíveis dentro
+                using var itemBr = new SolidBrush(Color.FromArgb(180, tabColor));
+                g.FillRectangle(itemBr, ix + 2, iy + 5, 3, 4);
+                g.FillRectangle(itemBr, ix + 6, iy + 5, 3, 4);
+                g.FillRectangle(itemBr, ix + 10, iy + 5, 3, 4);
             }
         }
 
+        /// <summary>Ícone de dispositivo estilo S7-1500 — PS + CPU + módulos I/O.</summary>
         private static void DrawIconDevice(Graphics g, int x, int y, int h)
         {
             int midY = y + h / 2;
-            int iw = 14, ih = 11;
-            int ix = x, iy = midY - ih / 2;
-            using var bodyBr = new SolidBrush(Color.FromArgb(45, 52, 68));
-            g.FillRectangle(bodyBr, ix, iy, iw, ih);
-            using var borderPen = new Pen(C_GOLD, 1f);
-            g.DrawRectangle(borderPen, ix, iy, iw - 1, ih - 1);
-            // slots verticais
-            using var slotPen = new Pen(Color.FromArgb(90, 100, 130), 1);
-            for (int i = 1; i <= 3; i++)
-                g.DrawLine(slotPen, ix + i * 3, iy + 2, ix + i * 3, iy + ih - 3);
+            int ix = x, iy = midY - 6;
+
+            // trilho (rail) — linha fina na base
+            using var railBr = new SolidBrush(Color.FromArgb(70, 80, 100));
+            g.FillRectangle(railBr, ix, iy + 11, 16, 2);
+
+            // PS (fonte de alimentação) — cinza escuro
+            using var psBr = new SolidBrush(Color.FromArgb(55, 62, 80));
+            g.FillRectangle(psBr, ix, iy, 3, 11);
+            using var psEdge = new SolidBrush(Color.FromArgb(90, 100, 125));
+            g.FillRectangle(psEdge, ix, iy, 1, 11);
+
+            // CPU — levemente mais claro com LED verde
+            using var cpuBr = new SolidBrush(Color.FromArgb(48, 58, 78));
+            g.FillRectangle(cpuBr, ix + 4, iy, 5, 11);
+            using var cpuBorder = new Pen(C_GOLD, 1f);
+            g.DrawRectangle(cpuBorder, ix + 4, iy, 4, 10);
+            // LED RUN (verde)
+            using var ledBr = new SolidBrush(C_OK);
+            g.FillRectangle(ledBr, ix + 5, iy + 2, 2, 2);
+            // LED SF (vermelho, apagado)
+            using var ledOffBr = new SolidBrush(Color.FromArgb(80, 60, 60));
+            g.FillRectangle(ledOffBr, ix + 5, iy + 5, 2, 2);
+
+            // Módulo DI — azul
+            using var diBr = new SolidBrush(Color.FromArgb(30, 55, 85));
+            g.FillRectangle(diBr, ix + 10, iy, 3, 11);
+            using var diEdge = new SolidBrush(Color.FromArgb(50, 90, 140));
+            g.FillRectangle(diEdge, ix + 10, iy, 1, 11);
+
+            // Módulo DQ — verde escuro
+            using var dqBr = new SolidBrush(Color.FromArgb(25, 65, 40));
+            g.FillRectangle(dqBr, ix + 14, iy, 3, 11);
+            using var dqEdge = new SolidBrush(Color.FromArgb(40, 100, 65));
+            g.FillRectangle(dqEdge, ix + 14, iy, 1, 11);
         }
 
+        /// <summary>Grupo de blocos — stack de documentos com cor do tipo.</summary>
         private static void DrawIconGroup(Graphics g, int x, int y, int h, Color color)
         {
             int midY = y + h / 2;
             int ix = x + 1;
-            // colchete { com linha horizontal
-            using var pen = new Pen(color, 1.5f);
-            g.DrawLine(pen, ix + 3, midY - 4, ix + 1, midY - 2);
-            g.DrawLine(pen, ix + 1, midY - 2, ix,     midY);
-            g.DrawLine(pen, ix,     midY,     ix + 1, midY + 2);
-            g.DrawLine(pen, ix + 1, midY + 2, ix + 3, midY + 4);
-            g.DrawLine(pen, ix + 4, midY,     ix + 12, midY);
+
+            // documento traseiro (sombra)
+            using var shadBr = new SolidBrush(Color.FromArgb(38, 45, 60));
+            g.FillRectangle(shadBr, ix + 3, midY - 6, 9, 11);
+
+            // documento frontal
+            using var bodyBr = new SolidBrush(Color.FromArgb(52, 60, 80));
+            g.FillRectangle(bodyBr, ix, midY - 5, 9, 11);
+
+            // borda colorida esquerda
+            using var edgeBr = new SolidBrush(color);
+            g.FillRectangle(edgeBr, ix, midY - 5, 2, 11);
+
+            // linha de conteúdo
+            using var lineBr = new SolidBrush(Color.FromArgb(90, color.R, color.G, color.B));
+            g.FillRectangle(lineBr, ix + 3, midY - 2, 5, 1);
+            g.FillRectangle(lineBr, ix + 3, midY + 1, 5, 1);
+        }
+
+        /// <summary>Ícone de grafo de chamadas — 3 nós ligados.</summary>
+        private static void DrawIconCallGraph(Graphics g, int x, int y, int h, Color color)
+        {
+            int midY = y + h / 2;
+            int ix = x + 1;
+
+            using var edgePen = new Pen(Color.FromArgb(140, color.R, color.G, color.B), 1f);
+            using var nodeBr  = new SolidBrush(color);
+            using var rootBr  = new SolidBrush(Color.FromArgb(220, color.R, color.G, color.B));
+
+            // arestas
+            g.DrawLine(edgePen, ix + 6, midY - 3, ix + 2,  midY + 2);
+            g.DrawLine(edgePen, ix + 6, midY - 3, ix + 10, midY + 2);
+
+            // nó raiz (maior)
+            g.FillEllipse(rootBr, ix + 4, midY - 6, 5, 5);
+
+            // nós filhos
+            g.FillEllipse(nodeBr, ix,      midY + 2, 4, 4);
+            g.FillEllipse(nodeBr, ix + 8,  midY + 2, 4, 4);
+        }
+
+        /// <summary>Ícone de hardware — placa de circuito estilizada.</summary>
+        private static void DrawIconHardware(Graphics g, int x, int y, int h, Color color)
+        {
+            int midY = y + h / 2;
+            int ix = x + 1;
+
+            // placa base (verde PCB escuro)
+            using var boardBr = new SolidBrush(Color.FromArgb(20, 50, 35));
+            g.FillRectangle(boardBr, ix, midY - 5, 13, 10);
+
+            // borda
+            using var borderPen = new Pen(Color.FromArgb(40, 110, 70), 1f);
+            g.DrawRectangle(borderPen, ix, midY - 5, 12, 9);
+
+            // chip central
+            using var chipBr = new SolidBrush(Color.FromArgb(45, 55, 48));
+            g.FillRectangle(chipBr, ix + 3, midY - 3, 6, 6);
+            using var chipBorder = new Pen(color, 1f);
+            g.DrawRectangle(chipBorder, ix + 3, midY - 3, 5, 5);
+
+            // pinos esquerda e direita
+            using var pinPen = new Pen(Color.FromArgb(160, color.R, color.G, color.B), 1f);
+            g.DrawLine(pinPen, ix,      midY - 2, ix + 3, midY - 2);
+            g.DrawLine(pinPen, ix,      midY + 1, ix + 3, midY + 1);
+            g.DrawLine(pinPen, ix + 8,  midY - 2, ix + 12, midY - 2);
+            g.DrawLine(pinPen, ix + 8,  midY + 1, ix + 12, midY + 1);
+
+            // LED no chip
+            using var ledBr = new SolidBrush(color);
+            g.FillRectangle(ledBr, ix + 5, midY - 1, 2, 2);
         }
 
         // ── Hover helper ──────────────────────────────────────────────────────
@@ -819,15 +1008,19 @@ namespace TiaTracker.UI
 
                     SetStatus("A ler Tipos de Dados (UDTs)...", Color.Silver);
                     _udts = reader.ReadAllUDTs();
-                    SetProgress(80);
+                    SetProgress(78);
+
+                    SetStatus("A ler topologia de hardware...", Color.Silver);
+                    _hwDevices = new HardwareReader(_conn.Project).ReadAll();
+                    SetProgress(84);
 
                     SetStatus("A construir árvore...", Color.Silver);
                     Invoke((Action)BuildTree);
-                    SetProgress(88);
+                    SetProgress(90);
 
                     _xmlResult = BuildXml(_blocks, _tagTables, _udts, path);
-                    SetProgress(94);
-                    _mdResult  = BuildMarkdown(_blocks, _tagTables, _udts, path);
+                    SetProgress(95);
+                    _mdResult  = BuildMarkdown(_blocks, _tagTables, _udts, _hwDevices, path);
                     SetProgress(100);
 
                     int obC = _blocks.Count(b => b.Type == "OB");
@@ -918,6 +1111,20 @@ namespace TiaTracker.UI
                         grp.Nodes.Add(new TreeNode($" {udt.Name}")
                             { ForeColor = C_UDT, Tag = udt });
                     devNode.Nodes.Add(grp);
+                }
+
+                // Hardware
+                var hwDev = _hwDevices.FirstOrDefault(h =>
+                    string.Equals(h.Name, dev, StringComparison.OrdinalIgnoreCase));
+                if (hwDev != null)
+                {
+                    var hwNode = new TreeNode($"  ⬡  Hardware  ({hwDev.Modules.Count} módulos)")
+                    {
+                        ForeColor = C_OB,
+                        NodeFont  = new Font("Segoe UI", 9f, FontStyle.Bold),
+                        Tag       = new HardwareTag { Device = dev }
+                    };
+                    devNode.Nodes.Add(hwNode);
                 }
 
                 // Grafo de chamadas
@@ -1095,6 +1302,14 @@ namespace TiaTracker.UI
                     ShowDetailHeader($"[UDT]  {u.Name}", $"#{u.Number}  ·  {u.Members.Count} membros  ·  {u.Device}", C_UDT);
                     RenderUdt(u);
                     break;
+                case HardwareTag hw:
+                    var hwInfo = _hwDevices.FirstOrDefault(h =>
+                        string.Equals(h.Name, hw.Device, StringComparison.OrdinalIgnoreCase));
+                    var modCount = hwInfo?.Modules.Count ?? 0;
+                    ShowDetailHeader("Topologia de Hardware", $"{hw.Device}  ·  {modCount} módulos", C_OB);
+                    if (hwInfo != null) RenderHardware(hwInfo);
+                    break;
+
                 case CallGraphTag cg:
                     var devBlks = _blocks.Where(b => b.Device == cg.Device).ToList();
                     ShowDetailHeader("Grafo de Chamadas", $"{cg.Device}  ·  {devBlks.Count} blocos", C_GOLD);
@@ -1196,6 +1411,64 @@ namespace TiaTracker.UI
         }
 
         // ── Render: Call Graph ───────────────────────────────────────────────
+        // ── Render: Hardware ──────────────────────────────────────────────────
+        private void RenderHardware(HwDeviceInfo hw)
+        {
+            // Cabeçalho de rede
+            var net = hw.Network;
+            if (!string.IsNullOrEmpty(net.IpAddress))
+            {
+                DetailLine($"\n  REDE", C_OB, true, 11f);
+                DetailLine("  " + new string('─', 80), C_GROUP);
+                DetailLine($"  IP Address   : {net.IpAddress}", C_TEXT);
+                if (!string.IsNullOrEmpty(net.SubnetMask))    DetailLine($"  Máscara      : {net.SubnetMask}",    C_IFACE);
+                if (!string.IsNullOrEmpty(net.RouterAddress)) DetailLine($"  Gateway      : {net.RouterAddress}", C_IFACE);
+                if (!string.IsNullOrEmpty(net.ProfinetName))  DetailLine($"  PROFINET     : {net.ProfinetName}",  C_IFACE);
+            }
+
+            if (!string.IsNullOrEmpty(hw.OrderNumber))
+            {
+                DetailLine($"\n  CPU / REFERÊNCIA", C_OB, true, 11f);
+                DetailLine("  " + new string('─', 80), C_GROUP);
+                DetailLine($"  {hw.OrderNumber}", C_TEXT);
+                if (!string.IsNullOrEmpty(hw.Comment)) DetailLine($"  {hw.Comment}", C_IFACE);
+            }
+
+            // Tabela de módulos
+            if (hw.Modules.Count > 0)
+            {
+                DetailLine($"\n  MÓDULOS NO RACK  ({hw.Modules.Count})", C_OB, true, 11f);
+                DetailLine("  " + new string('─', 80), C_GROUP);
+                DetailLine($"  {"Slot",-5} {"Nome",-30} {"Referência",-25} {"Entradas",-12} {"Saídas",-12}", C_IFACE, true);
+                DetailLine("  " + new string('─', 80), C_GROUP);
+
+                foreach (var m in hw.Modules.OrderBy(x => x.Slot))
+                {
+                    var inp = string.IsNullOrEmpty(m.InputRange)  ? "—" : m.InputRange;
+                    var out_ = string.IsNullOrEmpty(m.OutputRange) ? "—" : m.OutputRange;
+                    var name = string.IsNullOrEmpty(m.Name) ? m.OrderNumber : m.Name;
+                    DetailLine($"  {m.Slot,-5} {name,-30} {m.OrderNumber,-25} {inp,-12} {out_,-12}", C_TEXT);
+
+                    if (!string.IsNullOrEmpty(m.Comment))
+                        DetailLine($"        // {m.Comment}", C_MUTED);
+
+                    foreach (var sub in m.SubModules.OrderBy(s => s.Slot))
+                    {
+                        var si = string.IsNullOrEmpty(sub.InputRange)  ? "—" : sub.InputRange;
+                        var so = string.IsNullOrEmpty(sub.OutputRange) ? "—" : sub.OutputRange;
+                        var sn = string.IsNullOrEmpty(sub.Name) ? sub.OrderNumber : sub.Name;
+                        DetailLine($"  └ {sub.Slot,-3} {sn,-30} {sub.OrderNumber,-25} {si,-12} {so,-12}", C_IFACE);
+                    }
+                }
+            }
+
+            if (hw.Modules.Count == 0 && string.IsNullOrEmpty(net.IpAddress) && string.IsNullOrEmpty(hw.OrderNumber))
+            {
+                DetailLine("\n  (informação de hardware não disponível para este device)", C_GROUP);
+                DetailLine("  O TIA Portal Openness API pode não expor todos os atributos de hardware offline.", C_MUTED);
+            }
+        }
+
         private void RenderCallGraph(
             List<BlockInfo> blocks,
             Dictionary<string, List<ProjectReader.CallEdge>> graph)
@@ -1440,6 +1713,9 @@ namespace TiaTracker.UI
 
         // ── Markdown para IA ──────────────────────────────────────────────────
         private string BuildMarkdown(List<BlockInfo> blocks, List<TagTableInfo> tagTables, List<UdtInfo> udts, string path)
+            => BuildMarkdown(blocks, tagTables, udts, _hwDevices, path);
+
+        private string BuildMarkdown(List<BlockInfo> blocks, List<TagTableInfo> tagTables, List<UdtInfo> udts, List<HwDeviceInfo> hwDevices, string path)
         {
             var sb = new StringBuilder();
             var projName = Path.GetFileNameWithoutExtension(path);
@@ -1468,6 +1744,12 @@ namespace TiaTracker.UI
             {
                 sb.AppendLine($"## Dispositivo: {dev}");
                 sb.AppendLine();
+
+                // ── Hardware Topology ─────────────────────────────────────────
+                var hwDev = hwDevices?.FirstOrDefault(h =>
+                    string.Equals(h.Name, dev, StringComparison.OrdinalIgnoreCase));
+                if (hwDev != null)
+                    MdHardware(sb, hwDev);
 
                 // ── Tag Tables ────────────────────────────────────────────────
                 var devTags = tagTables.Where(t => t.Device == dev).ToList();
@@ -1853,6 +2135,48 @@ namespace TiaTracker.UI
         }
 
         private static string Esc(string s) => s?.Replace("|", "\\|") ?? "";
+
+        private static void MdHardware(StringBuilder sb, HwDeviceInfo hw)
+        {
+            sb.AppendLine("### Topologia de Hardware");
+            sb.AppendLine();
+
+            // Cabeçalho do dispositivo
+            if (!string.IsNullOrEmpty(hw.OrderNumber))
+                sb.AppendLine($"> **Referência:** `{hw.OrderNumber}`");
+            if (!string.IsNullOrEmpty(hw.Comment))
+                sb.AppendLine($"> **Descrição:** {hw.Comment}");
+
+            var net = hw.Network;
+            if (!string.IsNullOrEmpty(net.IpAddress))
+            {
+                sb.Append($"> **IP:** `{net.IpAddress}`");
+                if (!string.IsNullOrEmpty(net.SubnetMask))    sb.Append($"  Máscara: `{net.SubnetMask}`");
+                if (!string.IsNullOrEmpty(net.RouterAddress)) sb.Append($"  Gateway: `{net.RouterAddress}`");
+                sb.AppendLine();
+            }
+            if (!string.IsNullOrEmpty(net.ProfinetName))
+                sb.AppendLine($"> **PROFINET:** `{net.ProfinetName}`");
+
+            sb.AppendLine();
+
+            // Tabela de módulos
+            if (hw.Modules.Count > 0)
+            {
+                sb.AppendLine("| Slot | Módulo | Referência | Entradas | Saídas | Comentário |");
+                sb.AppendLine("|------|--------|------------|----------|--------|------------|");
+                foreach (var m in hw.Modules)
+                {
+                    sb.AppendLine($"| {m.Slot} | {Esc(m.Name)} | `{Esc(m.OrderNumber)}` | {Esc(m.InputRange)} | {Esc(m.OutputRange)} | {Esc(m.Comment)} |");
+                    foreach (var sub in m.SubModules)
+                        sb.AppendLine($"| └ {sub.Slot} | {Esc(sub.Name)} | `{Esc(sub.OrderNumber)}` | {Esc(sub.InputRange)} | {Esc(sub.OutputRange)} | {Esc(sub.Comment)} |");
+                }
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("---");
+            sb.AppendLine();
+        }
 
         private void ExportDeviceMd(string deviceName)
         {
