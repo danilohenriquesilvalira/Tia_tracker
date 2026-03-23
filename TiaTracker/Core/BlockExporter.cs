@@ -7,8 +7,6 @@ using Siemens.Engineering.HW.Features;
 using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.Blocks;
 using Siemens.Engineering.SW.Tags;
-using TiaTracker.Models;
-
 namespace TiaTracker.Core
 {
     public class ExportStats

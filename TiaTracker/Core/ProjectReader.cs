@@ -22,6 +22,7 @@ namespace TiaTracker.Core
         public string          InitialValue { get; set; }
         public string          Comment      { get; set; }
         public List<MemberInfo> Members     { get; set; } = new List<MemberInfo>();
+        public int             BitOffset    { get; set; } = -1;  // -1 = desconhecido/otimizado
     }
 
     public class SectionInfo
@@ -34,8 +35,12 @@ namespace TiaTracker.Core
     {
         public int          Index    { get; set; }
         public string       Title    { get; set; }
+        public string       Comment  { get; set; } = "";   // comentário do corpo da rede
         public string       Language { get; set; }
-        public List<string> Lines    { get; set; } = new List<string>();
+        public List<string> Lines         { get; set; } = new List<string>();
+        public List<string> UsedVariables { get; set; } = new List<string>();
+        // DB members: "DbName.MemberPath" ex: "DB_POSICAO.POSICAO_ENT_DIR"
+        public List<string> UsedDbMembers { get; set; } = new List<string>();
     }
 
     public class TagInfo
@@ -63,15 +68,17 @@ namespace TiaTracker.Core
 
     public class BlockInfo
     {
-        public string            Name       { get; set; }
-        public string            Type       { get; set; }
-        public string            Language   { get; set; }
-        public string            Device     { get; set; }
-        public int               Number     { get; set; }
-        public string            FolderPath { get; set; } = "";   // ex: "Motor Control/Safety"
-        public string            RawXml     { get; set; } = "";   // XML bruto exportado pelo TIA
-        public List<SectionInfo> Interface  { get; set; } = new List<SectionInfo>();
-        public List<NetworkInfo> Networks   { get; set; } = new List<NetworkInfo>();
+        public string            Name        { get; set; }
+        public string            Type        { get; set; }
+        public string            Language    { get; set; }
+        public string            Device      { get; set; }
+        public int               Number      { get; set; }
+        public string            Comment     { get; set; } = "";   // descrição do bloco
+        public string            FolderPath  { get; set; } = "";   // ex: "Motor Control/Safety"
+        public string            RawXml      { get; set; } = "";   // XML bruto exportado pelo TIA
+        public bool              IsOptimized { get; set; } = true;  // default S7-1500
+        public List<SectionInfo> Interface   { get; set; } = new List<SectionInfo>();
+        public List<NetworkInfo> Networks    { get; set; } = new List<NetworkInfo>();
     }
 
     /// <summary>
@@ -177,14 +184,38 @@ namespace TiaTracker.Core
                 var numEl = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "Number");
                 if (numEl != null) int.TryParse(numEl.Value, out number);
 
+                // Parse block-level comment (descrição do bloco)
+                var blockCommentEl = doc.Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName == "Comment" &&
+                                         e.Parent?.Name.LocalName == "AttributeList");
+                var blockComment = blockCommentEl?.Descendants()
+                    .Where(e => e.Name.LocalName == "Text" && !string.IsNullOrWhiteSpace(e.Value))
+                    .Select(e => e.Value.Trim()).FirstOrDefault() ?? "";
+
                 // Parse language
                 var langEl = doc.Descendants()
                     .FirstOrDefault(e => e.Name.LocalName == "ProgrammingLanguage" &&
                                          e.Parent?.Name.LocalName == "AttributeList");
                 var lang = langEl?.Value ?? "";
 
+                // Parse MemoryLayout (Standard vs Optimized)
+                var memLayout = doc.Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName == "MemoryLayout")?.Value ?? "Optimized";
+                bool isOptimized = !memLayout.Equals("Standard", StringComparison.OrdinalIgnoreCase);
+
                 // Parse interface sections
                 var iface = ParseInterface(doc);
+
+                // Calculate member offsets for Standard DBs
+                if (!isOptimized && (blockType == "DB" || blockType == "iDB"))
+                {
+                    var staticSec = iface.FirstOrDefault(s => s.Name == "Static");
+                    if (staticSec != null)
+                    {
+                        int bitPos = 0;
+                        CalculateMemberOffsets(staticSec.Members, ref bitPos);
+                    }
+                }
 
                 // Parse networks (CompileUnits)
                 var networks = ParseNetworks(doc);
@@ -204,15 +235,17 @@ namespace TiaTracker.Core
 
                 return new BlockInfo
                 {
-                    Name       = block.Name,
-                    Type       = blockType,
-                    Language   = lang,
-                    Device     = deviceName,
-                    Number     = number,
-                    FolderPath = folderPath,
-                    RawXml     = xml,
-                    Interface  = iface,
-                    Networks   = networks
+                    Name        = block.Name,
+                    Type        = blockType,
+                    Language    = lang,
+                    Device      = deviceName,
+                    Number      = number,
+                    Comment     = blockComment,
+                    FolderPath  = folderPath,
+                    RawXml      = xml,
+                    IsOptimized = isOptimized,
+                    Interface   = iface,
+                    Networks    = networks
                 };
             }
             catch (Exception ex)
@@ -319,12 +352,21 @@ namespace TiaTracker.Core
                     .FirstOrDefault(e => e.Name.LocalName == "MultilingualText" &&
                         (string)e.Attribute("CompositionName") == "Title");
                 var title = titleEl?.Descendants()
-                    .FirstOrDefault(e => e.Name.LocalName == "Text")?.Value?.Trim() ?? "";
+                    .Where(e => e.Name.LocalName == "Text" && !string.IsNullOrWhiteSpace(e.Value))
+                    .Select(e => e.Value.Trim()).FirstOrDefault() ?? "";
+
+                var commentEl = cu.Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName == "MultilingualText" &&
+                        (string)e.Attribute("CompositionName") == "Comment");
+                var netComment = commentEl?.Descendants()
+                    .Where(e => e.Name.LocalName == "Text" && !string.IsNullOrWhiteSpace(e.Value))
+                    .Select(e => e.Value.Trim()).FirstOrDefault() ?? "";
 
                 var net = new NetworkInfo
                 {
                     Index    = i + 1,
                     Title    = title,
+                    Comment  = netComment,
                     Language = lang
                 };
 
@@ -352,6 +394,38 @@ namespace TiaTracker.Core
                         net.Lines.AddRange(ReconstructLadFbd(sourceEl));
                     }
                 }
+
+                // Extrair variáveis globais diretas (1 Component = tag, não membro de DB)
+                net.UsedVariables = cu.Descendants()
+                    .Where(e => e.Name.LocalName == "Access" &&
+                                (string)e.Attribute("Scope") == "GlobalVariable")
+                    .Select(e => {
+                        var comps = e.Descendants()
+                            .Where(c => c.Name.LocalName == "Component").ToList();
+                        return comps.Count == 1 ? comps[0].Attribute("Name")?.Value : null;
+                    })
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .Distinct()
+                    .OrderBy(n => n)
+                    .ToList();
+
+                // Extrair membros de DB (2+ Components = DB.Membro)
+                net.UsedDbMembers = cu.Descendants()
+                    .Where(e => e.Name.LocalName == "Access" &&
+                                (string)e.Attribute("Scope") == "GlobalVariable")
+                    .Select(e => {
+                        var comps = e.Descendants()
+                            .Where(c => c.Name.LocalName == "Component")
+                            .Select(c => c.Attribute("Name")?.Value ?? "")
+                            .Where(s => !string.IsNullOrEmpty(s))
+                            .ToList();
+                        if (comps.Count < 2) return null;
+                        return comps[0] + "." + string.Join(".", comps.Skip(1));
+                    })
+                    .Where(n => n != null)
+                    .Distinct()
+                    .OrderBy(n => n)
+                    .ToList();
 
                 // Only add non-empty networks
                 if (net.Lines.Count > 0 || !string.IsNullOrEmpty(net.Title))
@@ -783,10 +857,17 @@ namespace TiaTracker.Core
 
         private static PlcSoftware GetPlcSoftware(Device device)
         {
-            foreach (DeviceItem item in device.DeviceItems)
+            return FindPlcSoftware(device.DeviceItems);
+        }
+
+        private static PlcSoftware FindPlcSoftware(IEnumerable<DeviceItem> items)
+        {
+            foreach (DeviceItem item in items)
             {
                 var sc = item.GetService<SoftwareContainer>();
                 if (sc?.Software is PlcSoftware plc) return plc;
+                var found = FindPlcSoftware(item.DeviceItems);
+                if (found != null) return found;
             }
             return null;
         }
@@ -909,6 +990,98 @@ namespace TiaTracker.Core
                 return null;
             }
             finally { try { File.Delete(tempFile); } catch { } }
+        }
+
+        // ── S7 Standard DB address calculation ────────────────────────────────
+
+        private static void CalculateMemberOffsets(List<MemberInfo> members, ref int bitPos)
+        {
+            foreach (var m in members)
+            {
+                bool isBool = string.Equals(m.DataType, "Bool", StringComparison.OrdinalIgnoreCase);
+
+                if (isBool)
+                {
+                    m.BitOffset = bitPos;
+                    bitPos++;
+                }
+                else
+                {
+                    // Pad to byte boundary
+                    if (bitPos % 8 != 0) bitPos = (bitPos / 8 + 1) * 8;
+
+                    // Word+ types: align to even byte
+                    int bytePos = bitPos / 8;
+                    int typeBytes = GetTypeByteSize(m.DataType);
+                    if (typeBytes >= 2 && bytePos % 2 != 0) { bytePos++; bitPos = bytePos * 8; }
+
+                    m.BitOffset = bitPos;
+
+                    if (m.Members.Count > 0)
+                    {
+                        // Struct: recurse into children
+                        int inner = bitPos;
+                        CalculateMemberOffsets(m.Members, ref inner);
+                        // Pad struct end to even byte
+                        if (inner % 8 != 0) inner = (inner / 8 + 1) * 8;
+                        if ((inner / 8) % 2 != 0) inner += 8;
+                        bitPos = inner;
+                    }
+                    else
+                    {
+                        int sizeBytes = typeBytes > 0 ? typeBytes : GetArrayByteSize(m.DataType);
+                        bitPos += sizeBytes * 8;
+                        if (sizeBytes == 0) bitPos += 8; // unknown type: advance 1 byte at minimum
+                    }
+                }
+            }
+        }
+
+        private static int GetTypeByteSize(string dataType)
+        {
+            if (dataType == null) return 0;
+            var dt = dataType.Trim();
+            var u = dt.ToUpperInvariant();
+            if (u == "BOOL")   return 0; // handled separately
+            if (u == "BYTE" || u == "SINT" || u == "USINT" || u == "CHAR") return 1;
+            if (u == "WORD" || u == "INT"  || u == "UINT"  || u == "WCHAR" ||
+                u == "DATE" || u == "S5TIME") return 2;
+            if (u == "DWORD"  || u == "DINT"  || u == "UDINT" ||
+                u == "REAL"   || u == "TIME"  || u == "TOD"   ||
+                u == "TIME_OF_DAY" || u == "DT" || u == "DATE_AND_TIME") return 4;
+            if (u == "LREAL"  || u == "LINT"  || u == "ULINT" ||
+                u == "LWORD"  || u == "LTIME" || u == "LDT"   ||
+                u == "LTOD")  return 8;
+            // String[n] = n+2 bytes
+            if (u.StartsWith("STRING"))
+            {
+                var sm = System.Text.RegularExpressions.Regex.Match(dt, @"\[(\d+)\]");
+                int n = sm.Success ? int.Parse(sm.Groups[1].Value) : 254;
+                return n + 2;
+            }
+            return 0; // Struct/Array/Unknown — handled by Members recursion or GetArrayByteSize
+        }
+
+        private static int GetArrayByteSize(string dataType)
+        {
+            // Array[lo..hi] of Type  OR  Array[lo1..hi1, lo2..hi2] of Type
+            var am = System.Text.RegularExpressions.Regex.Match(
+                dataType ?? "",
+                @"Array\s*\[([^\]]+)\]\s*of\s+(.+)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!am.Success) return 0;
+            var dims = am.Groups[1].Value.Split(',');
+            int count = 1;
+            foreach (var dim in dims)
+            {
+                var range = dim.Trim().Split(new string[]{".."},StringSplitOptions.None);
+                if (range.Length == 2 &&
+                    int.TryParse(range[0].Trim(), out int lo) &&
+                    int.TryParse(range[1].Trim(), out int hi))
+                    count *= (hi - lo + 1);
+            }
+            int elemSize = GetTypeByteSize(am.Groups[2].Value.Trim());
+            return count * (elemSize > 0 ? elemSize : 1);
         }
     }
 }

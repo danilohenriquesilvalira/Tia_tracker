@@ -18,7 +18,7 @@ namespace TiaTracker.UI
         // ── Controls ──────────────────────────────────────────────────────────
         private TextBox              _txtPath;
         private TextBox              _txtSearch;
-        private Button               _btnBrowse, _btnRun, _btnSaveXml, _btnSaveMd;
+        private Button               _btnBrowse, _btnRun, _btnSaveXml, _btnSaveMd, _btnTcp;
         private ProgressBar          _progress;
         private TreeView             _tree;
         private RichTextBox          _rtbDetail;
@@ -43,7 +43,10 @@ namespace TiaTracker.UI
         // Tag especial para o nó de grafo na TreeView
         private class CallGraphTag { public string Device; }
 
-        // ── Win32: impede que o TIA Portal desforme a nossa janela ────────────
+        // ── Win32 ─────────────────────────────────────────────────────────────
+        [System.Runtime.InteropServices.DllImport("uxtheme.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int SetWindowTheme(IntPtr hWnd, string appName, string idList);
+
         const int  WM_WINDOWPOSCHANGING = 0x0046;
         const uint SWP_NOSIZE           = 0x0001;
         const uint SWP_NOMOVE           = 0x0002;
@@ -68,26 +71,29 @@ namespace TiaTracker.UI
             base.WndProc(ref m);
         }
 
-        // ── Theme — VS Code Dark+ ──────────────────────────────────────────────
-        static readonly Color BG      = Color.FromArgb( 30,  30,  30);   // #1E1E1E
-        static readonly Color PANEL   = Color.FromArgb( 37,  37,  38);   // #252526
-        static readonly Color TREE_BG = Color.FromArgb( 37,  37,  38);   // #252526
-        static readonly Color LOG_BG  = Color.FromArgb( 30,  30,  30);   // #1E1E1E
-        static readonly Color C_OB    = Color.FromArgb( 86, 156, 214);   // #569CD6 keyword blue
-        static readonly Color C_FB    = Color.FromArgb( 78, 201, 176);   // #4EC9B0 type teal
-        static readonly Color C_FC    = Color.FromArgb(220, 220, 170);   // #DCDCAA function yellow
-        static readonly Color C_DB    = Color.FromArgb(206, 145, 120);   // #CE9178 string orange
-        static readonly Color C_TAGS  = Color.FromArgb(156, 220, 254);   // #9CDCFE variable blue
-        static readonly Color C_UDT   = Color.FromArgb(197, 134, 192);   // #C586C0 purple
-        static readonly Color C_NET   = Color.FromArgb(106, 153,  85);   // #6A9955 comment green
-        static readonly Color C_IFACE = Color.FromArgb(128, 128, 128);   // #808080 grey
-        static readonly Color C_TEXT  = Color.FromArgb(212, 212, 212);   // #D4D4D4 default text
-        static readonly Color C_OK    = Color.FromArgb(106, 153,  85);   // #6A9955 green
-        static readonly Color C_ERR   = Color.FromArgb(244,  71,  71);   // #F44747 red
-        static readonly Color C_GOLD  = Color.FromArgb(215, 186, 125);   // #D7BA7D device nodes
-        static readonly Color C_GROUP = Color.FromArgb(128, 128, 128);   // #808080 grey
-        static readonly Color C_BLUE  = Color.FromArgb(  0, 120, 212);   // #0078D4 accent blue
-        static readonly Color C_SEL   = Color.FromArgb( 38,  79, 120);   // #264F78 selection
+        // ── Theme — Antigravity Dark ───────────────────────────────────────────
+        static readonly Color BG      = Color.FromArgb( 13,  17,  23);   // #0D1117 — fundo
+        static readonly Color PANEL   = Color.FromArgb( 22,  27,  34);   // #161B22 — painéis
+        static readonly Color SURFACE = Color.FromArgb( 33,  38,  50);   // #212632 — inputs/cards
+        static readonly Color BORDER  = Color.FromArgb( 48,  54,  61);   // #30363D — bordas
+        static readonly Color TREE_BG = Color.FromArgb( 22,  27,  34);   // #161B22
+        static readonly Color LOG_BG  = Color.FromArgb( 13,  17,  23);   // #0D1117
+        static readonly Color C_OB    = Color.FromArgb(121, 192, 255);   // #79C0FF  azul
+        static readonly Color C_FB    = Color.FromArgb( 86, 211, 100);   // #56D364  verde
+        static readonly Color C_FC    = Color.FromArgb(227, 179,  65);   // #E3B341  âmbar
+        static readonly Color C_DB    = Color.FromArgb(247, 129, 102);   // #F78166  coral
+        static readonly Color C_TAGS  = Color.FromArgb(121, 192, 255);   // #79C0FF  azul
+        static readonly Color C_UDT   = Color.FromArgb(210, 168, 255);   // #D2A8FF  violeta
+        static readonly Color C_NET   = Color.FromArgb( 86, 211, 100);   // #56D364  verde
+        static readonly Color C_IFACE = Color.FromArgb(139, 148, 158);   // #8B949E  cinza médio
+        static readonly Color C_TEXT  = Color.FromArgb(230, 237, 243);   // #E6EDF3  texto
+        static readonly Color C_MUTED = Color.FromArgb(125, 133, 144);   // #7D8590  texto apagado
+        static readonly Color C_OK    = Color.FromArgb( 86, 211, 100);   // #56D364  verde
+        static readonly Color C_ERR   = Color.FromArgb(248,  81,  73);   // #F85149  vermelho
+        static readonly Color C_GOLD  = Color.FromArgb(227, 179,  65);   // #E3B341  âmbar device
+        static readonly Color C_GROUP = Color.FromArgb(139, 148, 158);   // #8B949E  cinza
+        static readonly Color C_BLUE  = Color.FromArgb( 31, 111, 235);   // #1F6FEB  accent
+        static readonly Color C_SEL   = Color.FromArgb( 31,  45,  63);   // #1F2D3F  seleção
 
         // ── Constructor ───────────────────────────────────────────────────────
         public MainForm() { BuildUI(); }
@@ -105,13 +111,17 @@ namespace TiaTracker.UI
             Icon          = MakeIcon();
 
             // ── Header — barra escura simples estilo VS Code ──────────────────
-            var header = new Panel { Dock = DockStyle.Top, Height = 48, BackColor = Color.FromArgb(37, 37, 38) };
+            var header = new Panel { Dock = DockStyle.Top, Height = 52, BackColor = PANEL };
             header.Paint += (s, e) =>
             {
+                var g  = e.Graphics;
                 var rc = header.ClientRectangle;
                 if (rc.Width <= 0 || rc.Height <= 0) return;
-                using var pen = new Pen(Color.FromArgb(68, 68, 68), 1);
-                e.Graphics.DrawLine(pen, 0, rc.Bottom - 1, rc.Right, rc.Bottom - 1);
+                using (var grad = new LinearGradientBrush(rc,
+                    Color.FromArgb(28, 33, 50), PANEL, LinearGradientMode.Vertical))
+                    g.FillRectangle(grad, rc);
+                using (var pen = new Pen(C_BLUE, 1))
+                    g.DrawLine(pen, 0, rc.Bottom - 1, rc.Right, rc.Bottom - 1);
             };
 
             var pnlHeaderLeft = new Panel { Dock = DockStyle.Left, Width = 50, BackColor = Color.Transparent };
@@ -124,8 +134,12 @@ namespace TiaTracker.UI
                 int r  = 16;
                 var circleRect = new Rectangle(cx - r, cy - r, r * 2, r * 2);
                 if (circleRect.Width <= 0 || circleRect.Height <= 0) return;
-                using var br = new SolidBrush(C_BLUE);
-                g.FillEllipse(br, circleRect);
+                using (var grad = new LinearGradientBrush(circleRect,
+                    Color.FromArgb(31, 111, 235), Color.FromArgb(120, 72, 210),
+                    LinearGradientMode.Vertical))
+                    g.FillEllipse(grad, circleRect);
+                using (var glow = new Pen(Color.FromArgb(60, 88, 166, 255), 1.5f))
+                    g.DrawEllipse(glow, circleRect);
                 using var f  = new Font("Segoe UI", 14f, FontStyle.Bold);
                 using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
                 using var sb = new SolidBrush(Color.White);
@@ -138,7 +152,7 @@ namespace TiaTracker.UI
                 Dock      = DockStyle.Left,
                 Width     = 200,
                 Font      = new Font("Segoe UI", 12f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(212, 212, 212),
+                ForeColor = C_TEXT,
                 TextAlign = ContentAlignment.MiddleLeft,
                 BackColor = Color.Transparent
             };
@@ -147,7 +161,7 @@ namespace TiaTracker.UI
                 Text      = "TIA Portal V18  ·  Leitura offline de projeto PLC  ·  Exportação XML & Markdown",
                 Dock      = DockStyle.Fill,
                 Font      = new Font("Segoe UI", 8.5f),
-                ForeColor = Color.FromArgb(128, 128, 128),
+                ForeColor = C_MUTED,
                 TextAlign = ContentAlignment.MiddleLeft,
                 BackColor = Color.Transparent
             };
@@ -160,7 +174,7 @@ namespace TiaTracker.UI
             {
                 Dock      = DockStyle.Top,
                 Height    = 46,
-                BackColor = Color.FromArgb(37, 37, 38),
+                BackColor = PANEL,
                 Padding   = new Padding(10, 6, 10, 6)
             };
 
@@ -185,7 +199,7 @@ namespace TiaTracker.UI
             {
                 Text      = "Projeto:",
                 Dock      = DockStyle.Fill,
-                ForeColor = Color.FromArgb(128, 128, 128),
+                ForeColor = C_MUTED,
                 TextAlign = ContentAlignment.MiddleRight,
                 Font      = new Font("Segoe UI", 8.5f)
             };
@@ -193,38 +207,30 @@ namespace TiaTracker.UI
             _txtPath = new TextBox
             {
                 Dock        = DockStyle.Fill,
-                BackColor   = Color.FromArgb(60, 60, 60),
-                ForeColor   = Color.FromArgb(212, 212, 212),
+                BackColor   = SURFACE,
+                ForeColor   = C_TEXT,
                 BorderStyle = BorderStyle.FixedSingle,
                 Font        = new Font("Consolas", 8.8f),
                 Text        = @"C:\Users\Admin\Desktop\C#_PLC\C#_PLC.ap18",
                 Margin      = new Padding(6, 0, 6, 0)
             };
 
-            _btnBrowse  = MkBtn("···",              38, Color.FromArgb(60, 60, 60));
+            _btnBrowse  = MkBtn("···",               38, SURFACE);
             _btnRun     = MkBtn("▶  Conectar e Ler", 174, C_BLUE);
-            _btnSaveXml = MkBtn("Salvar XML",        138, Color.FromArgb(60, 60, 60));
-            _btnSaveMd  = MkBtn("Exportar para IA",  158, Color.FromArgb(60, 60, 60));
-            var btnEditor = MkBtn("✏  Criar Bloco",  148, Color.FromArgb(80, 50, 120));
+            _btnSaveXml = MkBtn("Salvar XML",         138, SURFACE);
+            _btnSaveMd  = MkBtn("Exportar para IA",   158, SURFACE);
+            _btnTcp     = MkBtn("⬡  Servidor TCP",    148, Color.FromArgb(20, 80, 100));
 
             _btnRun.Font        = new Font("Segoe UI", 9.5f, FontStyle.Bold);
             _btnRun.Margin      = new Padding(4, 0, 4, 0);
             _btnSaveXml.Enabled = false;
             _btnSaveMd.Enabled  = false;
-            _btnSaveMd.FlatAppearance.BorderColor = Color.FromArgb(68, 68, 68);
 
             _btnBrowse.Click  += (s, e) => BrowseProject();
             _btnRun.Click     += async (s, e) => await RunAsync();
             _btnSaveXml.Click += (s, e) => SaveXml();
             _btnSaveMd.Click  += (s, e) => SaveMd();
-            btnEditor.Click   += (s, e) => new BlockEditorForm(_conn).Show();
-
-            // hover nos botões
-            AddHover(_btnBrowse,  Color.FromArgb(80, 80, 80),   Color.FromArgb(60, 60, 60));
-            AddHover(_btnSaveXml, Color.FromArgb(80, 80, 80),   Color.FromArgb(60, 60, 60));
-            AddHover(_btnSaveMd,  Color.FromArgb(80, 80, 80),   Color.FromArgb(60, 60, 60));
-            AddHover(_btnRun,     Color.FromArgb(14, 99, 156),   C_BLUE);
-            AddHover(btnEditor,   Color.FromArgb(100, 60, 150),  Color.FromArgb(80, 50, 120));
+            _btnTcp.Click     += (s, e) => OpenTcpServer();
 
             tbl.Controls.Add(lblPath,     0, 0);
             tbl.Controls.Add(_txtPath,    1, 0);
@@ -232,7 +238,7 @@ namespace TiaTracker.UI
             tbl.Controls.Add(_btnRun,     3, 0);
             tbl.Controls.Add(_btnSaveXml, 4, 0);
             tbl.Controls.Add(_btnSaveMd,  5, 0);
-            tbl.Controls.Add(btnEditor,   6, 0);
+            tbl.Controls.Add(_btnTcp,     6, 0);
             toolbar.Controls.Add(tbl);
 
             _progress = new ProgressBar
@@ -243,18 +249,20 @@ namespace TiaTracker.UI
                 Minimum   = 0,
                 Maximum   = 100,
                 Value     = 0,
-                BackColor = Color.FromArgb(37, 37, 38)
+                BackColor  = PANEL,
+                ForeColor  = C_BLUE
             };
+            _progress.HandleCreated += (s, e) => SetWindowTheme(_progress.Handle, "", "");
 
             // ── StatusStrip ───────────────────────────────────────────────────
-            var strip = new StatusStrip { BackColor = Color.FromArgb(0, 122, 204), SizingGrip = false };
+            var strip = new StatusStrip { BackColor = Color.FromArgb(18, 22, 30), SizingGrip = false };
             _lblStatus = new ToolStripStatusLabel
             {
                 Text      = "  Pronto. Selecione um projeto e clique em  ▶ Conectar e Ler.",
-                ForeColor = Color.White,
+                ForeColor = C_TEXT,
                 Spring    = true
             };
-            _lblStats = new ToolStripStatusLabel { Text = "", ForeColor = Color.FromArgb(200, 235, 255), Spring = false };
+            _lblStats = new ToolStripStatusLabel { Text = "", ForeColor = C_BLUE, Spring = false };
             strip.Items.AddRange(new ToolStripItem[] { _lblStatus, _lblStats });
 
             // ── Outer split ───────────────────────────────────────────────────
@@ -263,7 +271,7 @@ namespace TiaTracker.UI
                 Dock          = DockStyle.Fill,
                 Orientation   = Orientation.Vertical,
                 SplitterWidth = 1,
-                BackColor     = Color.FromArgb(68, 68, 68),
+                BackColor     = BORDER,
             };
 
             // ── Left panel ────────────────────────────────────────────────────
@@ -277,7 +285,7 @@ namespace TiaTracker.UI
             {
                 e.Graphics.FillRectangle(new SolidBrush(PANEL), treeTitle.ClientRectangle);
                 using var f = new Font("Segoe UI", 7.5f, FontStyle.Bold);
-                using var b = new SolidBrush(Color.FromArgb(128, 128, 128));
+                using var b = new SolidBrush(C_MUTED);
                 e.Graphics.DrawString("  EXPLORADOR", f, b, 2, 8);
             };
 
@@ -285,8 +293,8 @@ namespace TiaTracker.UI
             {
                 Dock        = DockStyle.Top,
                 Height      = 26,
-                BackColor   = Color.FromArgb(60, 60, 60),
-                ForeColor   = Color.FromArgb(128, 128, 128),
+                BackColor   = SURFACE,
+                ForeColor   = C_MUTED,
                 BorderStyle = BorderStyle.None,
                 Font        = new Font("Segoe UI", 9f),
                 Text        = "  Filtrar blocos...",
@@ -294,15 +302,15 @@ namespace TiaTracker.UI
             };
             _txtSearch.GotFocus += (s, e) =>
             {
-                if (_txtSearch.Text.Contains("Filtrar")) { _txtSearch.Text = ""; _txtSearch.ForeColor = Color.FromArgb(212, 212, 212); }
+                if (_txtSearch.Text.Contains("Filtrar")) { _txtSearch.Text = ""; _txtSearch.ForeColor = C_TEXT; }
             };
             _txtSearch.LostFocus += (s, e) =>
             {
-                if (string.IsNullOrWhiteSpace(_txtSearch.Text)) { _txtSearch.Text = "  Filtrar blocos..."; _txtSearch.ForeColor = Color.FromArgb(128, 128, 128); }
+                if (string.IsNullOrWhiteSpace(_txtSearch.Text)) { _txtSearch.Text = "  Filtrar blocos..."; _txtSearch.ForeColor = C_MUTED; }
             };
             _txtSearch.TextChanged += (s, e) => FilterTree(_txtSearch.Text);
 
-            var searchBorder = new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Color.FromArgb(68, 68, 68) };
+            var searchBorder = new Panel { Dock = DockStyle.Top, Height = 1, BackColor = BORDER };
 
             _tree = new TreeView
             {
@@ -357,7 +365,7 @@ namespace TiaTracker.UI
                 Dock          = DockStyle.Fill,
                 Orientation   = Orientation.Horizontal,
                 SplitterWidth = 1,
-                BackColor     = Color.FromArgb(68, 68, 68),
+                BackColor     = BORDER,
                 FixedPanel    = FixedPanel.Panel2
             };
 
@@ -366,13 +374,13 @@ namespace TiaTracker.UI
             {
                 Dock      = DockStyle.Top,
                 Height    = 48,
-                BackColor = Color.FromArgb(37, 37, 38),
+                BackColor = PANEL,
                 Visible   = false
             };
             _detailHeader.Paint += (s, e) =>
             {
                 var rc = _detailHeader.ClientRectangle;
-                using var pen = new Pen(Color.FromArgb(68, 68, 68), 1);
+                using var pen = new Pen(BORDER, 1);
                 e.Graphics.DrawLine(pen, 0, rc.Bottom - 1, rc.Right, rc.Bottom - 1);
             };
             _lblDetailTitle = new Label
@@ -389,7 +397,7 @@ namespace TiaTracker.UI
                 Location  = new Point(14, 28),
                 Size      = new Size(800, 16),
                 Font      = new Font("Segoe UI", 8f),
-                ForeColor = Color.FromArgb(128, 128, 128),
+                ForeColor = C_MUTED,
                 BackColor = Color.Transparent,
                 AutoSize  = false
             };
@@ -419,8 +427,8 @@ namespace TiaTracker.UI
                 Text      = "  OUTPUT",
                 Dock      = DockStyle.Top,
                 Height    = 22,
-                BackColor = Color.FromArgb(37, 37, 38),
-                ForeColor = Color.FromArgb(128, 128, 128),
+                BackColor = PANEL,
+                ForeColor = C_MUTED,
                 Font      = new Font("Segoe UI", 7.5f, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleLeft
             };
@@ -428,7 +436,7 @@ namespace TiaTracker.UI
             {
                 Dock        = DockStyle.Fill,
                 BackColor   = LOG_BG,
-                ForeColor   = Color.FromArgb(128, 128, 128),
+                ForeColor   = C_MUTED,
                 Font        = new Font("Consolas", 8.5f),
                 ReadOnly    = true,
                 BorderStyle = BorderStyle.None,
@@ -486,7 +494,7 @@ namespace TiaTracker.UI
             {
                 int midY   = rc.Y + rc.Height / 2;
                 int arrowX = rc.X - 14;
-                using var pen = new Pen(Color.FromArgb(128, 128, 128), 1);
+                using var pen = new Pen(C_MUTED, 1);
                 if (node.IsExpanded)
                 {
                     g.DrawLine(pen, arrowX - 3, midY - 2, arrowX,     midY + 3);
@@ -518,7 +526,7 @@ namespace TiaTracker.UI
                 if (kind == "device")
                     DrawIconDevice(g, iconX, rc.Y, rc.Height);
                 else if (kind == "folder")
-                    DrawIconFolder(g, iconX, rc.Y, rc.Height, Color.FromArgb(220, 186, 90), node.IsExpanded);
+                    DrawIconFolder(g, iconX, rc.Y, rc.Height, C_GOLD, node.IsExpanded);
                 else if (kind.StartsWith("group:"))
                 {
                     var t = kind.Substring(6);
@@ -548,10 +556,10 @@ namespace TiaTracker.UI
             int iw = 11, ih = 13, fold = 3;
             int ix = x, iy = midY - ih / 2;
             // fundo do documento
-            using var bodyBr = new SolidBrush(Color.FromArgb(210, 210, 210));
+            using var bodyBr = new SolidBrush(Color.FromArgb(55, 62, 80));
             g.FillRectangle(bodyBr, ix, iy, iw, ih);
             // canto dobrado
-            using var foldBr = new SolidBrush(Color.FromArgb(150, 150, 150));
+            using var foldBr = new SolidBrush(Color.FromArgb(80, 90, 112));
             var foldPts = new Point[] {
                 new Point(ix + iw - fold, iy),
                 new Point(ix + iw, iy + fold),
@@ -593,12 +601,12 @@ namespace TiaTracker.UI
             int midY = y + h / 2;
             int iw = 14, ih = 11;
             int ix = x, iy = midY - ih / 2;
-            using var bodyBr = new SolidBrush(Color.FromArgb(75, 75, 80));
+            using var bodyBr = new SolidBrush(Color.FromArgb(45, 52, 68));
             g.FillRectangle(bodyBr, ix, iy, iw, ih);
-            using var borderPen = new Pen(Color.FromArgb(160, 160, 165), 1);
+            using var borderPen = new Pen(C_GOLD, 1f);
             g.DrawRectangle(borderPen, ix, iy, iw - 1, ih - 1);
             // slots verticais
-            using var slotPen = new Pen(Color.FromArgb(180, 180, 185), 1);
+            using var slotPen = new Pen(Color.FromArgb(90, 100, 130), 1);
             for (int i = 1; i <= 3; i++)
                 g.DrawLine(slotPen, ix + i * 3, iy + 2, ix + i * 3, iy + ih - 3);
         }
@@ -632,10 +640,12 @@ namespace TiaTracker.UI
                 using (var g = Graphics.FromImage(bmp))
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
-                    g.Clear(Color.FromArgb(22, 22, 28));
-                    // Fundo arredondado azul
-                    using (var b = new SolidBrush(Color.FromArgb(0, 112, 200)))
-                        g.FillEllipse(b, 2, 2, 28, 28);
+                    g.Clear(Color.FromArgb(13, 17, 23));
+                    using (var grad = new LinearGradientBrush(
+                        new Rectangle(2, 2, 28, 28),
+                        Color.FromArgb(31, 111, 235), Color.FromArgb(120, 72, 210),
+                        LinearGradientMode.Vertical))
+                        g.FillEllipse(grad, 2, 2, 28, 28);
                     // Letra "D" centrada
                     using (var f = new Font("Segoe UI", 14f, FontStyle.Bold))
                         TextRenderer.DrawText(g, "D", f, new Rectangle(2, 2, 28, 28), Color.White,
@@ -646,21 +656,99 @@ namespace TiaTracker.UI
             catch { return SystemIcons.Application; }
         }
 
-        private Button MkBtn(string text, int width, Color? bg = null)
+        private RoundButton MkBtn(string text, int width, Color? bg = null)
         {
-            var b = new Button
+            return new RoundButton(bg ?? SURFACE)
             {
                 Text        = text,
                 Dock        = DockStyle.Fill,
                 MinimumSize = new Size(width, 26),
-                BackColor   = bg ?? Color.FromArgb(60, 60, 60),
-                ForeColor   = Color.FromArgb(212, 212, 212),
-                FlatStyle   = FlatStyle.Flat,
-                Cursor      = Cursors.Hand,
+                ForeColor   = C_TEXT,
+                Font        = Font,
                 Margin      = Padding.Empty
             };
-            b.FlatAppearance.BorderColor = Color.FromArgb(68, 68, 68);
-            return b;
+        }
+
+        // ── Botão com cantos arredondados (custom paint) ───────────────────────
+        private sealed class RoundButton : Button
+        {
+            private readonly Color _base;
+            private readonly Color _hover;
+            private bool _over;
+
+            public RoundButton(Color baseColor)
+            {
+                _base  = baseColor;
+                _hover = Color.FromArgb(
+                    Math.Min(255, baseColor.R + 22),
+                    Math.Min(255, baseColor.G + 22),
+                    Math.Min(255, baseColor.B + 28));
+                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                         ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+                FlatStyle = FlatStyle.Flat;
+                FlatAppearance.BorderSize = 0;
+                Cursor = Cursors.Hand;
+            }
+
+            protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _over = true;  Invalidate(); }
+            protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _over = false; Invalidate(); }
+            protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Invalidate(); }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                var g = e.Graphics;
+                g.SmoothingMode    = SmoothingMode.AntiAlias;
+                g.PixelOffsetMode  = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+
+                // Pintar fundo do parent para cantos transparentes
+                var parentBg = Parent?.BackColor ?? Color.FromArgb(22, 27, 34);
+                using (var pb = new SolidBrush(parentBg))
+                    g.FillRectangle(pb, ClientRectangle);
+
+                Color btnColor = !Enabled
+                    ? Color.FromArgb(28, 33, 45)
+                    : _over ? _hover : _base;
+                Color txtColor = !Enabled
+                    ? Color.FromArgb(72, 79, 92)
+                    : ForeColor;
+
+                var rc = ClientRectangle;
+                rc.Inflate(-1, -1);
+                using (var path = RoundPath(rc, 5))
+                {
+                    using (var br = new SolidBrush(btnColor))
+                        g.FillPath(br, path);
+
+                    // Shimmer no topo
+                    if (Enabled)
+                    {
+                        var sRect = new Rectangle(rc.X, rc.Y, rc.Width, Math.Min(rc.Height, 10));
+                        using (var sh = new LinearGradientBrush(sRect,
+                            Color.FromArgb(35, 255, 255, 255), Color.FromArgb(0, 255, 255, 255),
+                            LinearGradientMode.Vertical))
+                        using (var sp = RoundPath(sRect, 5))
+                            g.FillPath(sh, sp);
+                    }
+
+                    using (var pen = new Pen(Color.FromArgb(Enabled ? 55 : 25, 255, 255, 255), 1f))
+                        g.DrawPath(pen, path);
+                }
+
+                TextRenderer.DrawText(g, Text, Font, ClientRectangle, txtColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            }
+
+            private static GraphicsPath RoundPath(Rectangle rc, int r)
+            {
+                int d = r * 2;
+                var p = new GraphicsPath();
+                p.AddArc(rc.X,          rc.Y,           d, d, 180, 90);
+                p.AddArc(rc.Right - d,  rc.Y,           d, d, 270, 90);
+                p.AddArc(rc.Right - d,  rc.Bottom - d,  d, d,   0, 90);
+                p.AddArc(rc.X,          rc.Bottom - d,  d, d,  90, 90);
+                p.CloseFigure();
+                return p;
+            }
         }
 
         // ── Browse ────────────────────────────────────────────────────────────
@@ -784,7 +872,7 @@ namespace TiaTracker.UI
             {
                 var devNode = new TreeNode($" {dev}")
                 {
-                    ForeColor = Color.FromArgb(212, 212, 212),
+                    ForeColor = C_TEXT,
                     NodeFont  = new Font("Segoe UI", 9f, FontStyle.Bold),
                     Tag       = "device"
                 };
@@ -921,7 +1009,7 @@ namespace TiaTracker.UI
         private TreeNode MakeFolderNode(string text, int count) =>
             new TreeNode(text)
             {
-                ForeColor = Color.FromArgb(220, 186, 90),
+                ForeColor = C_GOLD,
                 NodeFont  = new Font("Segoe UI", 8.5f),
                 Tag       = "folder"
             };
@@ -929,7 +1017,7 @@ namespace TiaTracker.UI
         private TreeNode MakeGroupNode(string text, string type = "DB") =>
             new TreeNode(text)
             {
-                ForeColor = Color.FromArgb(180, 180, 180),
+                ForeColor = C_IFACE,
                 NodeFont  = new Font("Segoe UI", 8.5f),
                 Tag       = $"group:{type}"
             };
@@ -1048,6 +1136,11 @@ namespace TiaTracker.UI
 
             if (b.Networks.Count > 0)
             {
+                var tagLookup   = BuildTagLookup(b.Device);
+                var dbLookup    = BuildDbMemberLookup(b.Device);
+                var dbBlockInfo = _blocks
+                    .Where(x => (x.Type == "DB" || x.Type == "iDB") && x.Device == b.Device)
+                    .ToDictionary(x => x.Name, x => x, StringComparer.OrdinalIgnoreCase);
                 DetailLine($"\n  REDES  ({b.Networks.Count})", col, true);
                 foreach (var net in b.Networks)
                 {
@@ -1058,6 +1151,44 @@ namespace TiaTracker.UI
                     else
                         foreach (var line in net.Lines)
                             DetailLine($"      {line}", C_TEXT);
+
+                    // Glossário de variáveis resolvidas da tag table
+                    var resolved = net.UsedVariables
+                        .Where(v => tagLookup.TryGetValue(v, out _))
+                        .Select(v => (Name: v, Tag: tagLookup[v]))
+                        .Where(x => !string.IsNullOrWhiteSpace(x.Tag.Address) ||
+                                    !string.IsNullOrWhiteSpace(x.Tag.Comment))
+                        .ToList();
+                    if (resolved.Count > 0)
+                    {
+                        DetailLine("      ···", C_GROUP);
+                        foreach (var (name, tag) in resolved)
+                        {
+                            var addr = string.IsNullOrWhiteSpace(tag.Address) ? "".PadRight(14) : tag.Address.PadRight(14);
+                            var cmt  = string.IsNullOrWhiteSpace(tag.Comment) ? "" : $"// {tag.Comment}";
+                            DetailLine($"      {name,-36}{addr}{cmt}", C_IFACE);
+                        }
+                    }
+
+                    // Glossário de membros de DB
+                    var resolvedDb = net.UsedDbMembers
+                        .Where(k => dbLookup.TryGetValue(k, out _))
+                        .Select(k => (Key: k, M: dbLookup[k]))
+                        .ToList();
+                    if (resolvedDb.Count > 0)
+                    {
+                        DetailLine("      ···  DB", C_GROUP);
+                        foreach (var (key, m) in resolvedDb)
+                        {
+                            var dbName = key.Contains('.') ? key.Substring(0, key.IndexOf('.')) : key;
+                            var dbRef  = dbBlockInfo.TryGetValue(dbName, out var dbi)
+                                ? FormatDbAddress(dbi.Number, m).PadRight(18)
+                                : "".PadRight(18);
+                            var init = string.IsNullOrWhiteSpace(m.InitialValue) ? "" : $" = {m.InitialValue}";
+                            var cmt  = string.IsNullOrWhiteSpace(m.Comment) ? "" : $"  // {m.Comment}";
+                            DetailLine($"      {key,-44}{dbRef}{m.DataType,-14}{init}{cmt}", C_IFACE);
+                        }
+                    }
                 }
             }
             else
@@ -1507,6 +1638,11 @@ namespace TiaTracker.UI
 
         private void MdBlock(StringBuilder sb, BlockInfo b)
         {
+            var tagLookup   = BuildTagLookup(b.Device);
+            var dbLookup    = BuildDbMemberLookup(b.Device);
+            var dbBlockInfo = _blocks
+                .Where(x => (x.Type == "DB" || x.Type == "iDB") && x.Device == b.Device)
+                .ToDictionary(x => x.Name, x => x, StringComparer.OrdinalIgnoreCase);
             var lang = b.Language;
             sb.AppendLine($"#### {b.Type}{b.Number} — {b.Name}");
             sb.AppendLine();
@@ -1519,6 +1655,13 @@ namespace TiaTracker.UI
             if (!string.IsNullOrEmpty(b.FolderPath))
                 sb.AppendLine($"| Pasta | `{b.FolderPath}` |");
             sb.AppendLine();
+
+            // Descrição do bloco
+            if (!string.IsNullOrWhiteSpace(b.Comment))
+            {
+                sb.AppendLine($"> **Descrição:** {b.Comment}");
+                sb.AppendLine();
+            }
 
             // Interface
             var secs = b.Interface.Where(s => s.Members.Count > 0).ToList();
@@ -1563,6 +1706,11 @@ namespace TiaTracker.UI
                     var title = string.IsNullOrWhiteSpace(net.Title) ? $"Network {net.Index}" : $"Network {net.Index}: {net.Title}";
                     sb.AppendLine($"**{title}**");
                     sb.AppendLine();
+                    if (!string.IsNullOrWhiteSpace(net.Comment))
+                    {
+                        sb.AppendLine($"> {net.Comment}");
+                        sb.AppendLine();
+                    }
                     if (net.Lines.Count > 0)
                     {
                         sb.AppendLine($"```{LangHint(net.Language)}");
@@ -1574,6 +1722,44 @@ namespace TiaTracker.UI
                     {
                         sb.AppendLine("_(rede vazia)_");
                     }
+
+                    // Glossário de variáveis — só tags reais da tag table
+                    var resolved = net.UsedVariables
+                        .Where(v => tagLookup.TryGetValue(v, out _))
+                        .Select(v => (Name: v, Tag: tagLookup[v]))
+                        .Where(x => !string.IsNullOrWhiteSpace(x.Tag.Address) ||
+                                    !string.IsNullOrWhiteSpace(x.Tag.Comment))
+                        .ToList();
+                    if (resolved.Count > 0)
+                    {
+                        sb.AppendLine();
+                        sb.AppendLine("| Variável | Endereço | Descrição |");
+                        sb.AppendLine("|----------|----------|-----------|");
+                        foreach (var (name, tag) in resolved)
+                            sb.AppendLine($"| `{Esc(name)}` | `{Esc(tag.Address)}` | {Esc(tag.Comment)} |");
+                    }
+
+                    // Membros de DB usados nesta rede
+                    var resolvedDb = net.UsedDbMembers
+                        .Where(k => dbLookup.TryGetValue(k, out _))
+                        .Select(k => (Key: k, M: dbLookup[k]))
+                        .ToList();
+                    if (resolvedDb.Count > 0)
+                    {
+                        sb.AppendLine();
+                        sb.AppendLine("| DB.Membro | Nº DB | Tipo | Valor Inicial | Descrição |");
+                        sb.AppendLine("|-----------|-------|------|---------------|-----------|");
+                        foreach (var (key, m) in resolvedDb)
+                        {
+                            var dbName = key.Contains('.') ? key.Substring(0, key.IndexOf('.')) : key;
+                            var dbNum  = dbBlockInfo.TryGetValue(dbName, out var dbi)
+                                ? FormatDbAddress(dbi.Number, m) : "";
+                            var init   = string.IsNullOrWhiteSpace(m.InitialValue) ? "" : m.InitialValue;
+                            var cmt    = string.IsNullOrWhiteSpace(m.Comment)      ? "" : m.Comment;
+                            sb.AppendLine($"| `{Esc(key)}` | `{Esc(dbNum)}` | `{Esc(m.DataType)}` | {Esc(init)} | {Esc(cmt)} |");
+                        }
+                    }
+
                     sb.AppendLine();
                 }
             }
@@ -1584,6 +1770,61 @@ namespace TiaTracker.UI
             }
 
             sb.AppendLine();
+        }
+
+        private static string FormatDbAddress(int dbNumber, MemberInfo m)
+        {
+            if (m.BitOffset < 0) return $"DB{dbNumber}";  // otimizado
+            int byteOff = m.BitOffset / 8;
+            int bitOff  = m.BitOffset % 8;
+            var u = m.DataType?.ToUpperInvariant() ?? "";
+            if (u == "BOOL")
+                return $"DB{dbNumber}.DBX{byteOff}.{bitOff}";
+            if (u == "BYTE" || u == "SINT" || u == "USINT" || u == "CHAR")
+                return $"DB{dbNumber}.DBB{byteOff}";
+            if (u == "WORD" || u == "INT" || u == "UINT" || u == "WCHAR" || u == "DATE" || u == "S5TIME")
+                return $"DB{dbNumber}.DBW{byteOff}";
+            if (u == "DWORD" || u == "DINT" || u == "UDINT" || u == "REAL" ||
+                u == "TIME"  || u == "TOD"  || u == "TIME_OF_DAY" || u == "DT")
+                return $"DB{dbNumber}.DBD{byteOff}";
+            // Struct, Array, String, Large types: show byte address
+            return $"DB{dbNumber}.DBB{byteOff}";
+        }
+
+        private Dictionary<string, TagInfo> BuildTagLookup(string device)
+        {
+            var dict = new Dictionary<string, TagInfo>(StringComparer.OrdinalIgnoreCase);
+            foreach (var tt in _tagTables.Where(t => t.Device == device))
+                foreach (var tag in tt.Tags)
+                    if (!string.IsNullOrEmpty(tag.Name) && !dict.ContainsKey(tag.Name))
+                        dict[tag.Name] = tag;
+            return dict;
+        }
+
+        // Lookup "DB_POSICAO.POSICAO_ENT_DIR" → MemberInfo  (só Static section dos DB do mesmo device)
+        private Dictionary<string, MemberInfo> BuildDbMemberLookup(string device)
+        {
+            var dict = new Dictionary<string, MemberInfo>(StringComparer.OrdinalIgnoreCase);
+            foreach (var db in _blocks.Where(b => (b.Type == "DB" || b.Type == "iDB") && b.Device == device))
+            {
+                var staticSec = db.Interface.FirstOrDefault(s => s.Name == "Static");
+                if (staticSec == null) continue;
+                FlattenDbMembers(db.Name, staticSec.Members, "", dict);
+            }
+            return dict;
+        }
+
+        private static void FlattenDbMembers(string dbName, List<MemberInfo> members,
+                                             string prefix, Dictionary<string, MemberInfo> dict)
+        {
+            foreach (var m in members)
+            {
+                var path = string.IsNullOrEmpty(prefix) ? m.Name : prefix + "." + m.Name;
+                var key  = dbName + "." + path;
+                if (!dict.ContainsKey(key)) dict[key] = m;
+                if (m.Members.Count > 0)
+                    FlattenDbMembers(dbName, m.Members, path, dict);
+            }
         }
 
         private static string LangHint(string lang)
@@ -1669,6 +1910,16 @@ namespace TiaTracker.UI
             }
         }
 
+        // ── TCP Server ────────────────────────────────────────────────────────
+        private TcpServerDialog _tcpDialog;
+        private void OpenTcpServer()
+        {
+            if (_tcpDialog == null || _tcpDialog.IsDisposed)
+                _tcpDialog = new TcpServerDialog();
+            _tcpDialog.Show();
+            _tcpDialog.BringToFront();
+        }
+
         // ── Thread-safe helpers ───────────────────────────────────────────────
         public void DetailLine(string text, Color color, bool bold = false, float? size = null)
         {
@@ -1738,13 +1989,13 @@ namespace TiaTracker.UI
         public override void Write(string value)
         {
             if (string.IsNullOrEmpty(value)) return;
-            var col = Color.FromArgb(130, 130, 148);
+            var col = Color.FromArgb(125, 133, 144);
             if (value.Contains("ERRO") || value.Contains("ERROR") || value.Contains("SKIP"))
-                col = Color.FromArgb(210, 80, 80);
+                col = Color.FromArgb(248, 81, 73);
             else if (value.Contains("OK") || value.Contains("Projecto :") || value.Contains("aberto"))
-                col = Color.FromArgb(90, 190, 90);
+                col = Color.FromArgb(86, 211, 100);
             else if (value.Contains("[AutoAccept]"))
-                col = Color.FromArgb(80, 170, 220);
+                col = Color.FromArgb(88, 166, 255);
             _form.LogLine(value, col);
         }
     }
@@ -1752,10 +2003,10 @@ namespace TiaTracker.UI
     // ── Dark theme renderer para ContextMenuStrip ─────────────────────────────
     internal class DarkMenuRenderer : ToolStripProfessionalRenderer
     {
-        static readonly Color BG_MENU  = Color.FromArgb(37, 37, 38);
-        static readonly Color FG_MENU  = Color.FromArgb(212, 212, 212);
-        static readonly Color SEL_MENU = Color.FromArgb(38, 79, 120);
-        static readonly Color BORDER   = Color.FromArgb(68, 68, 68);
+        static readonly Color BG_MENU  = Color.FromArgb(22, 27, 34);
+        static readonly Color FG_MENU  = Color.FromArgb(230, 237, 243);
+        static readonly Color SEL_MENU = Color.FromArgb(31, 45, 63);
+        static readonly Color BORDER   = Color.FromArgb(48, 54, 61);
 
         public DarkMenuRenderer() : base(new DarkMenuColors()) { }
 
@@ -1773,13 +2024,13 @@ namespace TiaTracker.UI
 
         private class DarkMenuColors : ProfessionalColorTable
         {
-            public override Color MenuItemSelected         => Color.FromArgb(38, 79, 120);
-            public override Color MenuItemBorder           => Color.FromArgb(68, 68, 68);
-            public override Color MenuBorder               => Color.FromArgb(68, 68, 68);
-            public override Color ToolStripDropDownBackground => Color.FromArgb(37, 37, 38);
-            public override Color ImageMarginGradientBegin => Color.FromArgb(37, 37, 38);
-            public override Color ImageMarginGradientMiddle=> Color.FromArgb(37, 37, 38);
-            public override Color ImageMarginGradientEnd   => Color.FromArgb(37, 37, 38);
+            public override Color MenuItemSelected         => Color.FromArgb(31, 45, 63);
+            public override Color MenuItemBorder           => Color.FromArgb(48, 54, 61);
+            public override Color MenuBorder               => Color.FromArgb(48, 54, 61);
+            public override Color ToolStripDropDownBackground => Color.FromArgb(22, 27, 34);
+            public override Color ImageMarginGradientBegin => Color.FromArgb(22, 27, 34);
+            public override Color ImageMarginGradientMiddle=> Color.FromArgb(22, 27, 34);
+            public override Color ImageMarginGradientEnd   => Color.FromArgb(22, 27, 34);
         }
     }
 }
