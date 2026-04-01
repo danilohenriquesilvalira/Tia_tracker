@@ -102,8 +102,8 @@ namespace TiaTracker.Core
                 var plcSw = GetPlcSoftware(device);
                 if (plcSw == null) continue;
 
-                Console.WriteLine($"\n  PLC: {device.Name}");
-                ReadBlockGroup(plcSw.BlockGroup, device.Name, all);
+                Console.WriteLine($"\n  PLC: {plcSw.Name}");
+                ReadBlockGroup(plcSw.BlockGroup, plcSw.Name, all);
             }
 
             // Enriquecer chamadas: "CALL FC_Motor [FC]" â†’ "CALL FC5 â€” FC_Motor [FC]"
@@ -881,7 +881,7 @@ namespace TiaTracker.Core
             {
                 var plcSw = GetPlcSoftware(device);
                 if (plcSw == null) continue;
-                ReadTagTableGroup(plcSw.TagTableGroup, device.Name, all);
+                ReadTagTableGroup(plcSw.TagTableGroup, plcSw.Name, all);
             }
             return all;
         }
@@ -942,7 +942,7 @@ namespace TiaTracker.Core
                 {
                     var plcSw = GetPlcSoftware(device);
                     if (plcSw == null) continue;
-                    ReadUdtGroup(plcSw.TypeGroup, device.Name, all);
+                    ReadUdtGroup(plcSw.TypeGroup, plcSw.Name, all);
                 }
             }
             catch (Exception ex)

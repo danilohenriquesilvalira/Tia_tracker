@@ -69,9 +69,12 @@ namespace TiaTracker.Core
 
         private HwDeviceInfo ReadDevice(Device device)
         {
+            // Usa o nome do software PLC (nome definido pelo utilizador na árvore do TIA Portal)
+            // em vez de device.Name que devolve o nome genérico da estação (ex: "S71500")
+            var plcSw = FindPlcSoftware(device.DeviceItems);
             var info = new HwDeviceInfo
             {
-                Name        = device.Name,
+                Name        = plcSw?.Name ?? device.Name,
                 OrderNumber = SafeAttr(device, "TypeIdentifier") ?? "",
                 Comment     = SafeAttr(device, "Comment") ?? ""
             };

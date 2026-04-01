@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using TiaTracker.Core;
 
@@ -376,12 +377,32 @@ namespace TiaTracker.UI
             ctxExportDevMd.Click += (s, e) => ExportDeviceMd(_tree.SelectedNode?.Tag as string == "device" ? _tree.SelectedNode?.Text?.Trim() : null);
             ctxMenu.Items.Add(ctxExportDevMd);
 
+            var ctxExportTagsMd = new ToolStripMenuItem("🏷  Exportar Tags deste PLC para IA (ficheiro único)...") { ForeColor = Color.FromArgb(130, 210, 130) };
+            ctxExportTagsMd.Click += (s, e) =>
+            {
+                var node       = _tree.SelectedNode;
+                var deviceName = node?.Parent?.Text?.Trim();
+                if (!string.IsNullOrEmpty(deviceName)) ExportTagsMd(deviceName);
+            };
+            ctxMenu.Items.Add(ctxExportTagsMd);
+
+            var ctxExportTagsMulti = new ToolStripMenuItem("📁  Exportar Tags deste PLC para IA (multi-ficheiro)...") { ForeColor = Color.FromArgb(100, 200, 255) };
+            ctxExportTagsMulti.Click += (s, e) =>
+            {
+                var node       = _tree.SelectedNode;
+                var deviceName = node?.Parent?.Text?.Trim();
+                if (!string.IsNullOrEmpty(deviceName)) ExportTagsMultiMd(deviceName);
+            };
+            ctxMenu.Items.Add(ctxExportTagsMulti);
+
             _tree.ContextMenuStrip = ctxMenu;
             ctxMenu.Opening += (s, e) =>
             {
                 var node = _tree.SelectedNode;
-                ctxExportXml.Enabled    = node?.Tag is BlockInfo b && !string.IsNullOrEmpty(b.RawXml);
-                ctxExportDevMd.Enabled  = node?.Tag as string == "device";
+                ctxExportXml.Enabled      = node?.Tag is BlockInfo b && !string.IsNullOrEmpty(b.RawXml);
+                ctxExportDevMd.Enabled    = node?.Tag as string == "device";
+                ctxExportTagsMd.Enabled   = node?.Tag as string == "group:tags";
+                ctxExportTagsMulti.Enabled = node?.Tag as string == "group:tags";
             };
 
             outerSplit.Panel1.Controls.Add(_tree);
@@ -1712,13 +1733,14 @@ namespace TiaTracker.UI
         }
 
         // ── Markdown para IA ──────────────────────────────────────────────────
-        private string BuildMarkdown(List<BlockInfo> blocks, List<TagTableInfo> tagTables, List<UdtInfo> udts, string path)
-            => BuildMarkdown(blocks, tagTables, udts, _hwDevices, path);
+        private string BuildMarkdown(List<BlockInfo> blocks, List<TagTableInfo> tagTables, List<UdtInfo> udts, string path, string installationName = null)
+            => BuildMarkdown(blocks, tagTables, udts, _hwDevices, path, installationName);
 
-        private string BuildMarkdown(List<BlockInfo> blocks, List<TagTableInfo> tagTables, List<UdtInfo> udts, List<HwDeviceInfo> hwDevices, string path)
+        private string BuildMarkdown(List<BlockInfo> blocks, List<TagTableInfo> tagTables, List<UdtInfo> udts, List<HwDeviceInfo> hwDevices, string path, string installationName = null)
         {
             var sb = new StringBuilder();
-            var projName = Path.GetFileNameWithoutExtension(path);
+            var projName    = Path.GetFileNameWithoutExtension(path);
+            var displayName = !string.IsNullOrWhiteSpace(installationName) ? installationName : projName;
 
             int obC = blocks.Count(b => b.Type == "OB");
             int fbC = blocks.Count(b => b.Type == "FB");
@@ -1726,11 +1748,20 @@ namespace TiaTracker.UI
             int dbC = blocks.Count(b => b.Type == "DB" || b.Type == "iDB");
 
             // ── Cabeçalho ─────────────────────────────────────────────────────
-            sb.AppendLine($"# Projeto PLC: {projName}");
+            sb.AppendLine($"# Base de Conhecimento PLC — {displayName}");
             sb.AppendLine();
+            sb.AppendLine($"> **Instalação:** {displayName}  ");
+            sb.AppendLine($"> **Projeto TIA Portal:** `{projName}`  ");
             sb.AppendLine($"> **Exportado em:** {DateTime.Now:yyyy-MM-dd HH:mm}  ");
-            sb.AppendLine($"> **Ficheiro:** `{path}`  ");
             sb.AppendLine($"> **Resumo:** {obC} OBs · {fbC} FBs · {fcC} FCs · {dbC} DBs · {tagTables.Count} Tag Tables · {udts.Count} UDTs");
+            sb.AppendLine();
+            sb.AppendLine($"> **Contexto para IA:** Este documento descreve o programa PLC da instalação **{displayName}**.");
+            sb.AppendLine($"> Ao responder qualquer questão, usa sempre dois níveis de explicação:");
+            sb.AppendLine($"> - **Técnico** (para eletricistas e programadores PLC): endereços exatos, condições lógicas, temporizadores, blocos de função");
+            sb.AppendLine($"> - **Operador** (linguagem simples): o que acontece fisicamente, qual equipamento atua, o que o operador vê");
+            sb.AppendLine($">");
+            sb.AppendLine($"> Glossário rápido: `%I` = entrada digital (sensor/botão), `%Q` = saída digital (motor/válvula/luz),");
+            sb.AppendLine($"> `%M` = memória interna, `%IW`/`%QW` = sinal analógico, `DB` = bloco de dados, `FB` = bloco de função, `OB1` = ciclo principal.");
             sb.AppendLine();
             sb.AppendLine("---");
             sb.AppendLine();
@@ -1774,7 +1805,7 @@ namespace TiaTracker.UI
                             sb.AppendLine("|----------|------|----------|------------|");
                             foreach (var tag in tt.Tags)
                             {
-                                var cmt = string.IsNullOrWhiteSpace(tag.Comment) ? "" : tag.Comment.Trim();
+                                var cmt = string.IsNullOrWhiteSpace(tag.Comment) ? "⚠ _sem descrição_" : tag.Comment.Trim();
                                 sb.AppendLine($"| `{Esc(tag.Name)}` | {Esc(tag.DataType)} | `{Esc(tag.Address)}` | {Esc(cmt)} |");
                             }
                         }
@@ -1833,6 +1864,20 @@ namespace TiaTracker.UI
 
                     MdBlock(sb, b);
                 }
+
+                // ── Falhas e Alarmes ──────────────────────────────────────────
+                MdFaultIndex(sb, blocks.Where(b => b.Device == dev).ToList(),
+                             tagTables.Where(t => t.Device == dev).ToList());
+
+                // ── I/O Disponível ────────────────────────────────────────────
+                MdAvailableIO(sb, tagTables.Where(t => t.Device == dev).ToList());
+
+                // ── Referências Cruzadas de Tags ──────────────────────────────
+                MdTagCrossRef(sb, blocks.Where(b => b.Device == dev).ToList(),
+                              tagTables.Where(t => t.Device == dev).ToList());
+
+                // ── Tags Sem Descrição ────────────────────────────────────────
+                MdTagsWithoutDescription(sb, tagTables.Where(t => t.Device == dev).ToList());
 
                 sb.AppendLine("---");
                 sb.AppendLine();
@@ -1985,8 +2030,11 @@ namespace TiaTracker.UI
                 sb.AppendLine();
                 foreach (var net in b.Networks)
                 {
-                    var title = string.IsNullOrWhiteSpace(net.Title) ? $"Network {net.Index}" : $"Network {net.Index}: {net.Title}";
-                    sb.AppendLine($"**{title}**");
+                    // Cabeçalho auto-contido — cada rede é um chunk independente para RAG
+                    var netTitle  = string.IsNullOrWhiteSpace(net.Title) ? $"Network {net.Index}" : $"Network {net.Index}: {net.Title}";
+                    var ctxFolder = !string.IsNullOrEmpty(b.FolderPath) ? $" · {b.FolderPath}" : "";
+                    sb.AppendLine($"##### {b.Name} — {netTitle}");
+                    sb.AppendLine($"*{b.Type}{b.Number} · {lang} · {b.Device}{ctxFolder}*");
                     sb.AppendLine();
                     if (!string.IsNullOrWhiteSpace(net.Comment))
                     {
@@ -2136,6 +2184,195 @@ namespace TiaTracker.UI
 
         private static string Esc(string s) => s?.Replace("|", "\\|") ?? "";
 
+        // ── Índice de Falhas e Alarmes ────────────────────────────────────────
+        private static void MdFaultIndex(StringBuilder sb, List<BlockInfo> blocks, List<TagTableInfo> tagTables)
+        {
+            var prefixes = new[] { "DEF_", "AL_", "ALARM_", "ERR_", "FAULT_" };
+            var faultTags = tagTables
+                .SelectMany(tt => tt.Tags)
+                .Where(t => prefixes.Any(p => t.Name.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                .GroupBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .OrderBy(t => t.Name)
+                .ToList();
+
+            if (faultTags.Count == 0) return;
+
+            // Mapa tag → redes onde aparece
+            var occ = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var b in blocks)
+                foreach (var net in b.Networks)
+                    foreach (var v in net.UsedVariables)
+                    {
+                        if (!occ.ContainsKey(v)) occ[v] = new List<string>();
+                        var r = string.IsNullOrWhiteSpace(net.Title)
+                            ? $"{b.Name} N{net.Index}"
+                            : $"{b.Name} N{net.Index} \"{net.Title}\"";
+                        if (!occ[v].Contains(r)) occ[v].Add(r);
+                    }
+
+            sb.AppendLine("### Índice de Falhas e Alarmes");
+            sb.AppendLine();
+            sb.AppendLine("> Tags com prefixo DEF_, AL_, ALARM_, ERR_ — condições de falha e alarme do sistema.");
+            sb.AppendLine();
+            sb.AppendLine("| Tag | Endereço | Tipo | Descrição | Aparece nas redes |");
+            sb.AppendLine("|-----|----------|------|-----------|-------------------|");
+            foreach (var tag in faultTags)
+            {
+                var uses = occ.TryGetValue(tag.Name, out var lst)
+                    ? string.Join(", ", lst.Take(6)) + (lst.Count > 6 ? $" (+{lst.Count - 6})" : "")
+                    : "—";
+                sb.AppendLine($"| `{Esc(tag.Name)}` | `{Esc(tag.Address)}` | {Esc(tag.DataType)} | {Esc(tag.Comment)} | {Esc(uses)} |");
+            }
+            sb.AppendLine();
+        }
+
+        // ── I/O Disponível ────────────────────────────────────────────────────
+        private static void MdAvailableIO(StringBuilder sb, List<TagTableInfo> tagTables)
+        {
+            var usedI = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var usedQ = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var tag in tagTables.SelectMany(tt => tt.Tags))
+            {
+                if (string.IsNullOrEmpty(tag.Address)) continue;
+                var a = tag.Address.TrimStart('%');
+                if      (IsBitAddr(a, "I")) usedI.Add(a);
+                else if (IsBitAddr(a, "Q")) usedQ.Add(a);
+            }
+
+            if (usedI.Count == 0 && usedQ.Count == 0) return;
+
+            int maxI = MaxByte(usedI, "I");
+            int maxQ = MaxByte(usedQ, "Q");
+
+            sb.AppendLine("### Entradas e Saídas Digitais Disponíveis");
+            sb.AppendLine();
+            sb.AppendLine("> Endereços digitais livres — disponíveis para novos sensores e atuadores.");
+            sb.AppendLine();
+
+            var freeI = FreeBits("I", usedI, maxI + 1);
+            var freeQ = FreeBits("Q", usedQ, maxQ + 1);
+
+            sb.AppendLine("**Entradas livres (%I):**");
+            sb.AppendLine();
+            if (freeI.Count > 0)
+                sb.AppendLine("`" + string.Join("`  `", freeI.Select(a => "%" + a)) + "`");
+            else
+                sb.AppendLine("_(todas as entradas estão atribuídas)_");
+
+            sb.AppendLine();
+            sb.AppendLine("**Saídas livres (%Q):**");
+            sb.AppendLine();
+            if (freeQ.Count > 0)
+                sb.AppendLine("`" + string.Join("`  `", freeQ.Select(a => "%" + a)) + "`");
+            else
+                sb.AppendLine("_(todas as saídas estão atribuídas)_");
+
+            sb.AppendLine();
+        }
+
+        private static bool IsBitAddr(string a, string prefix) =>
+            a.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+            !a.StartsWith(prefix + "W", StringComparison.OrdinalIgnoreCase) &&
+            !a.StartsWith(prefix + "D", StringComparison.OrdinalIgnoreCase) &&
+            !a.StartsWith(prefix + "B", StringComparison.OrdinalIgnoreCase) &&
+            a.Contains('.');
+
+        private static int MaxByte(HashSet<string> bits, string prefix)
+        {
+            int max = 0;
+            foreach (var b in bits)
+            {
+                var s = b.Substring(prefix.Length);
+                var dot = s.IndexOf('.');
+                if (dot > 0 && int.TryParse(s.Substring(0, dot), out int n))
+                    max = Math.Max(max, n);
+            }
+            return max;
+        }
+
+        private static List<string> FreeBits(string prefix, HashSet<string> used, int maxByte)
+        {
+            var free = new List<string>();
+            for (int b = 0; b <= maxByte; b++)
+                for (int bit = 0; bit <= 7; bit++)
+                {
+                    var a = $"{prefix}{b}.{bit}";
+                    if (!used.Contains(a)) free.Add(a);
+                }
+            return free;
+        }
+
+        // ── Cross-Reference de Tags ───────────────────────────────────────────
+        private static void MdTagCrossRef(StringBuilder sb, List<BlockInfo> blocks, List<TagTableInfo> tagTables)
+        {
+            var allTagNames = new HashSet<string>(
+                tagTables.SelectMany(tt => tt.Tags).Select(t => t.Name),
+                StringComparer.OrdinalIgnoreCase);
+
+            var xref = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var b in blocks)
+                foreach (var net in b.Networks)
+                    foreach (var v in net.UsedVariables)
+                    {
+                        if (!allTagNames.Contains(v)) continue;
+                        if (!xref.ContainsKey(v)) xref[v] = new List<string>();
+                        var r = string.IsNullOrWhiteSpace(net.Title)
+                            ? $"{b.Name} N{net.Index}"
+                            : $"{b.Name} N{net.Index}";
+                        if (!xref[v].Contains(r)) xref[v].Add(r);
+                    }
+
+            if (xref.Count == 0) return;
+
+            var tagLookup = tagTables.SelectMany(tt => tt.Tags)
+                .GroupBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            sb.AppendLine("### Referências Cruzadas de Tags");
+            sb.AppendLine();
+            sb.AppendLine("> Para cada tag, lista todos os blocos e redes onde é utilizada. Essencial para rastrear sinal desde a entrada física até à saída.");
+            sb.AppendLine();
+            sb.AppendLine("| Tag | Endereço | Comentário | Usada em (bloco N°rede) |");
+            sb.AppendLine("|-----|----------|------------|------------------------|");
+            foreach (var kv in xref.OrderBy(x => x.Key))
+            {
+                tagLookup.TryGetValue(kv.Key, out var ti);
+                var addr = ti?.Address ?? "";
+                var cmt  = ti?.Comment ?? "";
+                var uses = string.Join(", ", kv.Value.Take(10));
+                if (kv.Value.Count > 10) uses += $" (+{kv.Value.Count - 10})";
+                sb.AppendLine($"| `{Esc(kv.Key)}` | `{Esc(addr)}` | {Esc(cmt)} | {Esc(uses)} |");
+            }
+            sb.AppendLine();
+        }
+
+        // ── Tags Sem Descrição ────────────────────────────────────────────────
+        private static void MdTagsWithoutDescription(StringBuilder sb, List<TagTableInfo> tagTables)
+        {
+            var missing = tagTables
+                .SelectMany(tt => tt.Tags
+                    .Where(t => string.IsNullOrWhiteSpace(t.Comment))
+                    .Select(t => (Table: tt.Name, Tag: t)))
+                .OrderBy(x => x.Table).ThenBy(x => x.Tag.Name)
+                .ToList();
+
+            if (missing.Count == 0) return;
+
+            sb.AppendLine("### ⚠ Tags Sem Descrição");
+            sb.AppendLine();
+            sb.AppendLine($"> **{missing.Count} tags** não têm comentário preenchido no TIA Portal.");
+            sb.AppendLine($"> Adicionar descrições a estas tags melhora significativamente a qualidade da análise por IA.");
+            sb.AppendLine($"> Para a IA, um tag sem comentário é um sinal desconhecido — pode descrever o seu propósito funcional aqui.");
+            sb.AppendLine();
+            sb.AppendLine("| Tag Table | Tag | Endereço | Tipo |");
+            sb.AppendLine("|-----------|-----|----------|------|");
+            foreach (var (table, tag) in missing)
+                sb.AppendLine($"| {Esc(table)} | `{Esc(tag.Name)}` | `{Esc(tag.Address)}` | {Esc(tag.DataType)} |");
+            sb.AppendLine();
+        }
+
         private static void MdHardware(StringBuilder sb, HwDeviceInfo hw)
         {
             sb.AppendLine("### Topologia de Hardware");
@@ -2181,10 +2418,12 @@ namespace TiaTracker.UI
         private void ExportDeviceMd(string deviceName)
         {
             if (string.IsNullOrEmpty(deviceName)) return;
+            var installName = AskInstallationName(deviceName);
+            if (installName == null) return;  // user cancelled
             var devBlocks    = _blocks.Where(b => b.Device == deviceName).ToList();
             var devTagTables = _tagTables.Where(t => t.Device == deviceName).ToList();
             var devUdts      = _udts.Where(u => u.Device == deviceName).ToList();
-            var md = BuildMarkdown(devBlocks, devTagTables, devUdts, _txtPath.Text);
+            var md = BuildMarkdown(devBlocks, devTagTables, devUdts, _txtPath.Text, installName);
             var safeName = string.Concat(deviceName.Split(Path.GetInvalidFileNameChars()));
             using var dlg = new SaveFileDialog
             {
@@ -2200,9 +2439,926 @@ namespace TiaTracker.UI
             }
         }
 
+        // ── Exportar Tags deste PLC (com glossário global e filtro) ──────────────
+        private void ExportTagsMd(string deviceName)
+        {
+            if (string.IsNullOrEmpty(deviceName)) return;
+            var installName = AskInstallationName(deviceName);
+            if (installName == null) return;
+
+            var devTags = _tagTables.Where(t => t.Device == deviceName).ToList();
+            if (devTags.Count == 0)
+            {
+                MessageBox.Show("Nenhuma Tag Table encontrada para este PLC.", "Tags",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var md       = BuildTagsMd(deviceName, installName, devTags);
+            var safeName = string.Concat(deviceName.Split(Path.GetInvalidFileNameChars()));
+            using var dlg = new SaveFileDialog
+            {
+                Title    = "Exportar Tags para IA",
+                Filter   = "Markdown (*.md)|*.md|Texto (*.txt)|*.txt",
+                FileName = $"Tags_{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.md"
+            };
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                File.WriteAllText(dlg.FileName, md, Encoding.UTF8);
+                var lines = md.Count(c => c == '\n');
+                SetStatus($"Tags exportadas: {Path.GetFileName(dlg.FileName)}  ({lines:N0} linhas)", C_OK);
+            }
+        }
+
+        // ── Export Multi-ficheiro ─────────────────────────────────────────────────
+
+        private void ExportTagsMultiMd(string deviceName)
+        {
+            if (string.IsNullOrEmpty(deviceName)) return;
+            var installName = AskInstallationName(deviceName);
+            if (installName == null) return;
+
+            var devTags = _tagTables.Where(t => t.Device == deviceName).ToList();
+            if (devTags.Count == 0)
+            {
+                MessageBox.Show("Nenhuma Tag Table encontrada para este PLC.", "Tags",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // Escolher pasta base
+            using var dlg = new FolderBrowserDialog
+            {
+                Description = $"Escolhe a pasta base onde criar {deviceName}/tags/"
+            };
+            if (dlg.ShowDialog() != DialogResult.OK) return;
+
+            // Criar estrutura: <base>/<PLC>/<tags>/
+            var safeName  = string.Concat(deviceName.Split(Path.GetInvalidFileNameChars()));
+            var tagsDir   = Path.Combine(dlg.SelectedPath, safeName, "tags");
+            Directory.CreateDirectory(tagsDir);
+
+            var files = BuildMultiTagFiles(deviceName, installName, devTags);
+            int total  = 0;
+            foreach (var kv in files)
+            {
+                File.WriteAllText(Path.Combine(tagsDir, kv.Key), kv.Value, Encoding.UTF8);
+                total++;
+            }
+
+            SetStatus($"Exportados {total} ficheiros → {tagsDir}", C_OK);
+            MessageBox.Show(
+                $"{total} ficheiros criados em:\n{tagsDir}\n\nCarrega a pasta no AnythingLLM.",
+                "Export Multi-ficheiro concluído",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private static Dictionary<string, string> BuildMultiTagFiles(
+            string deviceName, string installName, List<TagTableInfo> tagTables)
+        {
+            var result = new Dictionary<string, string>();
+            var stamp  = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+
+            // Cabeçalho reutilizável
+            string Hdr(string title) =>
+                $"# {title} — {installName}\n\n" +
+                $"> **PLC:** `{deviceName}`  \n" +
+                $"> **Exportado em:** {stamp}  \n" +
+                $"> **Fonte:** TiaTracker — Barragem de Crestuma-Lever\n\n---\n\n";
+
+            // Filtrar tags
+            var allTags = tagTables.SelectMany(tt => tt.Tags
+                .Where(t => !IsAnonymousTag(t) && !IsSystemTag(t))
+                .Select(t => (Table: tt.Name, Tag: t))).ToList();
+
+            var diTags = allTags.Where(x => GetTagCategory(x.Tag.Address) == "di").ToList();
+            var doTags = allTags.Where(x => GetTagCategory(x.Tag.Address) == "do").ToList();
+            var aiTags = allTags.Where(x => GetTagCategory(x.Tag.Address) == "ai").ToList();
+            var aoTags = allTags.Where(x => GetTagCategory(x.Tag.Address) == "ao").ToList();
+            var mbTags = allTags.Where(x => GetTagCategory(x.Tag.Address) == "mb").ToList();
+            var mwTags = allTags.Where(x => GetTagCategory(x.Tag.Address) == "mw").ToList();
+
+            // ── Resumo de equipamentos ──────────────────────────────────────────
+            {
+                var sb = new StringBuilder();
+                sb.Append(Hdr("Resumo de Equipamentos"));
+                sb.AppendLine($"Este ficheiro é o ponto de entrada para consultas gerais sobre o **{deviceName}**.");
+                sb.AppendLine("Descreve em linguagem simples os equipamentos físicos controlados por este PLC.");
+                sb.AppendLine();
+                AppendEquipmentSummary(sb, deviceName, diTags, doTags);
+                result["resumo_equipamentos.md"] = sb.ToString();
+            }
+
+            // ── Entradas Digitais por grupo ────────────────────────────────────
+            static string GetDiG(string n) { var u = n.ToUpperInvariant();
+                if (u.StartsWith("RM_")||u.StartsWith("DEF_ARR")||u.StartsWith("PROT_BOMB")||u.StartsWith("PROT_VALV")||u.StartsWith("DISP_INT_GER")||u.StartsWith("PROT_ANALIS")||u.StartsWith("PROT_DESCARR")||u.StartsWith("DEF_DESCARR")||u.StartsWith("ENCARQ_")||u.StartsWith("VARIAD_")||u.StartsWith("TRAV_")||u.StartsWith("FREIO_")) return "di_motores_bombas";
+                if (u.StartsWith("FC_")) return "di_fins_curso";
+                if (u.StartsWith("BT_")||u.StartsWith("STOP_")||u.StartsWith("RESET")||u.StartsWith("TEST_")) return "di_botoes_comandos";
+                if (u.StartsWith("COND_")||u.StartsWith("DISP_")||u.StartsWith("PRES_")||u.StartsWith("EMERG_")||u.StartsWith("PS_")||u.StartsWith("AL_MOD")||u.StartsWith("DEF_MOD")||u.StartsWith("PROT_24")||u.StartsWith("PRES_24")||u.StartsWith("PROT_")||u.StartsWith("FALT_")) return "di_condicoes_alimentacao";
+                if (u.StartsWith("RESERV_")||u.StartsWith("RESERVA_")) return "di_reservas";
+                return "di_outros"; }
+
+            var diGroupTitles = new Dictionary<string, (string Title, string Prose)>
+            {
+                { "di_motores_bombas",       ("Entradas Digitais — Motores e Bombas",
+                  "As bombas hidráulicas são os motores que pressurizam o óleo para mover os pistões das comportas. " +
+                  "Cada motor tem retorno de marcha (confirma que está a girar), defeito de arranque e proteção elétrica. " +
+                  "Quando um motor não arranca: verificar proteção → retorno de marcha → defeito de arranque.") },
+                { "di_fins_curso",           ("Entradas Digitais — Sensores de Posição (Fins de Curso)",
+                  "Sensores mecânicos nos pistões hidráulicos. Indicam se o pistão chegou ao topo (aberto), " +
+                  "está estabilizado, ou desceu completamente (fechado). " +
+                  "Se o enchimento não avança de fase, verificar se o sensor da fase atual confirmou a posição.") },
+                { "di_botoes_comandos",      ("Entradas Digitais — Botões e Comandos do Quadro",
+                  "Botões físicos do quadro elétrico local e comandos remotos: subir, descer, stop, " +
+                  "seleção de modo manual/automático e seleção de comporta A (direita) ou B (esquerda).") },
+                { "di_condicoes_alimentacao",("Entradas Digitais — Condições, Presenças de Tensão e Alimentação",
+                  "Condições de autorização de outros PLCs, presenças de tensão (400VAC, 220VDC, 24VDC) " +
+                  "e proteções gerais do quadro. Se o sistema não arranca sem causa aparente, verificar estes sinais.") },
+                { "di_reservas",             ("Entradas Digitais — Entradas Reservadas",
+                  "Entradas físicas não ligadas a nenhum equipamento. Reservadas para expansão futura. " +
+                  "O seu estado não influencia o funcionamento do sistema.") },
+                { "di_outros",               ("Entradas Digitais — Outros", "Entradas digitais sem classificação definida.") },
+            };
+
+            foreach (var grp in diTags.GroupBy(x => GetDiG(x.Tag.Name)).OrderBy(g => g.Key))
+            {
+                if (!diGroupTitles.TryGetValue(grp.Key, out var meta)) continue;
+                var sb = new StringBuilder();
+                sb.Append(Hdr(meta.Title));
+                sb.AppendLine(meta.Prose);
+                sb.AppendLine();
+                sb.AppendLine("| Variável | Tipo | Endereço | Comentário | Significado Inferido |");
+                sb.AppendLine("|----------|------|----------|------------|---------------------|");
+                foreach (var (table, tag) in grp.OrderBy(x => x.Tag.Address))
+                {
+                    var cmt = string.IsNullOrWhiteSpace(tag.Comment) ? "—" : Esc(tag.Comment.Trim());
+                    sb.AppendLine($"| `{Esc(tag.Name)}` | {tag.DataType} | {HumanAddress(tag.Address)} | {cmt} | {InferTagMeaning(tag.Name)} |");
+                }
+                result[$"{grp.Key}.md"] = sb.ToString();
+            }
+
+            // ── Saídas Digitais por grupo ──────────────────────────────────────
+            static string GetDoG(string n) { var u = n.ToUpperInvariant();
+                if (u.StartsWith("OS_")||u.StartsWith("OM_")||u.StartsWith("OA_")||u.StartsWith("OD_")) return "do_ordens_marcha";
+                if (u.StartsWith("SIN_BOMB")||u.StartsWith("SIN_VALV")||u.StartsWith("SIN_COMP")||u.StartsWith("SIN_ESTAB")||u.StartsWith("SIN_V2_")||u.StartsWith("SIN_V_DESC")||u.StartsWith("SIN_DEF_COMP")||u.StartsWith("SIN_AG")||u.StartsWith("SIN_CIRC")) return "do_sinalizacoes_comportas";
+                if (u.StartsWith("SIN_")) return "do_sinalizacoes_gerais";
+                if (u.StartsWith("INTERF_")||u.StartsWith("INT_")) return "do_interface_comando";
+                if (u.StartsWith("BYPASS_")||u.StartsWith("BY_PASS_")||u.StartsWith("SEMAF_")||u.StartsWith("RESERV_")||u.StartsWith("RESERVA_")||u.StartsWith("CPU_")) return "do_outros";
+                return "do_outros"; }
+
+            var doGroupTitles = new Dictionary<string, (string Title, string Prose)>
+            {
+                { "do_ordens_marcha",         ("Saídas Digitais — Ordens de Arranque e Marcha",
+                  "Comandos que ligam e desligam motores, bombas e válvulas hidráulicas. " +
+                  "OS_ arranca um motor; OM_ abre ou fecha uma válvula. " +
+                  "Após emitir uma ordem de arranque, o PLC aguarda o retorno de marcha — se não chegar, regista defeito.") },
+                { "do_sinalizacoes_comportas", ("Saídas Digitais — Sinalizações de Comportas e Bombas",
+                  "Lâmpadas e indicações no painel que mostram o estado das comportas e bombas. " +
+                  "Não comandam equipamentos — apenas sinalizam o estado para os operadores.") },
+                { "do_sinalizacoes_gerais",    ("Saídas Digitais — Sinalizações Gerais (modo, alimentação, defeitos)",
+                  "Lâmpadas de modo (automático/manual/desligado), presença de tensão, faltas e defeitos gerais do quadro.") },
+                { "do_interface_comando",      ("Saídas Digitais — Interface para PLC Comando",
+                  "Impulsos de comunicação enviados ao PLC_Comando. Não atuam em hardware local — " +
+                  "informam o PLC_Comando sobre o estado do enchimento para gerir as autorizações.") },
+                { "do_outros",                 ("Saídas Digitais — Bypass, Semáforos e Reservas",
+                  "Bypass de segurança (manutenção), semáforos náuticos para embarcações e saídas reservadas.") },
+            };
+
+            foreach (var grp in doTags.GroupBy(x => GetDoG(x.Tag.Name)).OrderBy(g => g.Key))
+            {
+                if (!doGroupTitles.TryGetValue(grp.Key, out var meta)) continue;
+                var sb = new StringBuilder();
+                sb.Append(Hdr(meta.Title));
+                sb.AppendLine(meta.Prose);
+                sb.AppendLine();
+                sb.AppendLine("| Variável | Tipo | Endereço | Comentário | Significado Inferido |");
+                sb.AppendLine("|----------|------|----------|------------|---------------------|");
+                foreach (var (table, tag) in grp.OrderBy(x => x.Tag.Address))
+                {
+                    var cmt = string.IsNullOrWhiteSpace(tag.Comment) ? "—" : Esc(tag.Comment.Trim());
+                    sb.AppendLine($"| `{Esc(tag.Name)}` | {tag.DataType} | {HumanAddress(tag.Address)} | {cmt} | {InferTagMeaning(tag.Name)} |");
+                }
+                result[$"{grp.Key}.md"] = sb.ToString();
+            }
+
+            // ── Analógicas ────────────────────────────────────────────────────
+            if (aiTags.Count > 0 || aoTags.Count > 0)
+            {
+                var sb = new StringBuilder();
+                sb.Append(Hdr("Entradas e Saídas Analógicas"));
+                sb.AppendLine("Medições analógicas (níveis, velocidades, tensões, correntes, potências) e setpoints para variadores.");
+                sb.AppendLine();
+                if (aiTags.Count > 0)
+                {
+                    sb.AppendLine("### Entradas Analógicas");
+                    sb.AppendLine();
+                    sb.AppendLine("| Variável | Tipo | Endereço | Comentário | Significado Inferido |");
+                    sb.AppendLine("|----------|------|----------|------------|---------------------|");
+                    foreach (var (_, tag) in aiTags.OrderBy(x => x.Tag.Address))
+                        sb.AppendLine($"| `{Esc(tag.Name)}` | {tag.DataType} | {HumanAddress(tag.Address)} | {(string.IsNullOrWhiteSpace(tag.Comment) ? "—" : Esc(tag.Comment.Trim()))} | {InferTagMeaning(tag.Name)} |");
+                    sb.AppendLine();
+                }
+                if (aoTags.Count > 0)
+                {
+                    sb.AppendLine("### Saídas Analógicas");
+                    sb.AppendLine();
+                    sb.AppendLine("| Variável | Tipo | Endereço | Comentário | Significado Inferido |");
+                    sb.AppendLine("|----------|------|----------|------------|---------------------|");
+                    foreach (var (_, tag) in aoTags.OrderBy(x => x.Tag.Address))
+                        sb.AppendLine($"| `{Esc(tag.Name)}` | {tag.DataType} | {HumanAddress(tag.Address)} | {(string.IsNullOrWhiteSpace(tag.Comment) ? "—" : Esc(tag.Comment.Trim()))} | {InferTagMeaning(tag.Name)} |");
+                }
+                result["analogicas.md"] = sb.ToString();
+            }
+
+            // ── Memórias Bits por grupo ────────────────────────────────────────
+            static string GetMbG(string n) { var u = n.ToUpperInvariant();
+                if (u.StartsWith("DEF_")) return "mb_defeitos";
+                if (u.StartsWith("AL_"))  return "mb_alarmes";
+                if (u.StartsWith("REG_")) return "mb_registos";
+                if (u.StartsWith("IMP_")||u.StartsWith("INTERF_")) return "mb_impulsos";
+                if (u.StartsWith("INTERD_")||u.StartsWith("AUTOR_")||u.StartsWith("COND_")) return "mb_interdicoes";
+                if (u.StartsWith("ENT_")||u.StartsWith("SAID_")) return "mb_navegacao";
+                if (u.StartsWith("FC_ENCOD_")||u.StartsWith("M_")) return "mb_controlo";
+                return "mb_outros"; }
+
+            var mbGroupTitles = new Dictionary<string, (string Title, string Prose)>
+            {
+                { "mb_defeitos",    ("Memórias — Defeitos",
+                  "Bits que ficam verdadeiro quando um equipamento falha. Um defeito bloqueia a operação e acende alarme no painel. " +
+                  "Para repor: corrigir a causa e fazer reset. Resolver primeiro defeitos de alimentação e emergência.") },
+                { "mb_alarmes",     ("Memórias — Alarmes",
+                  "Condições anormais do processo: velocidade fora dos limites, pressão baixa, tempo excedido. " +
+                  "Um alarme não bloqueia necessariamente mas indica que algo está fora dos parâmetros normais.") },
+                { "mb_registos",    ("Memórias — Registos de Estado",
+                  "Guardam o estado atual do ciclo: modo automático/manual, fase do enchimento, posição das comportas. " +
+                  "Quando algo falha, consultar os registos para perceber em que fase o processo estava.") },
+                { "mb_impulsos",    ("Memórias — Impulsos e Interfaces entre PLCs",
+                  "Sinais de comunicação entre PLCs. Não representam equipamentos físicos. " +
+                  "Se houver falha de coordenação entre PLCs, verificar estes bits.") },
+                { "mb_interdicoes", ("Memórias — Interdições e Autorizações",
+                  "Interdições bloqueiam uma operação por segurança; autorizações permitem avançar. " +
+                  "Se o sistema não executa uma manobra esperada, verificar interdições ativas ou autorizações em falta.") },
+                { "mb_navegacao",   ("Memórias — Permissões de Navegação",
+                  "Autorização de entrada/saída de embarcações na eclusa. Coordenados com o PLC_Comando.") },
+                { "mb_controlo",    ("Memórias — Controlo de Atuadores e Encoder",
+                  "Bits internos de controlo dos pistões: ordem de subida/descida ativa, pausa, diferença de posição entre lados. " +
+                  "Também inclui posições calculadas por encoder.") },
+                { "mb_outros",      ("Memórias — Outros Merkers",
+                  "Clocks de temporização, resets, flags de operação e sinalizações internas diversas.") },
+            };
+
+            foreach (var grp in mbTags.GroupBy(x => GetMbG(x.Tag.Name)).OrderBy(g => g.Key))
+            {
+                if (!mbGroupTitles.TryGetValue(grp.Key, out var meta)) continue;
+                var sb = new StringBuilder();
+                sb.Append(Hdr(meta.Title));
+                sb.AppendLine(meta.Prose);
+                sb.AppendLine();
+                sb.AppendLine("| Variável | Tipo | Endereço | Comentário | Significado Inferido |");
+                sb.AppendLine("|----------|------|----------|------------|---------------------|");
+                foreach (var (table, tag) in grp.OrderBy(x => x.Tag.Address))
+                {
+                    var cmt = string.IsNullOrWhiteSpace(tag.Comment) ? "—" : Esc(tag.Comment.Trim());
+                    sb.AppendLine($"| `{Esc(tag.Name)}` | {tag.DataType} | {HumanAddress(tag.Address)} | {cmt} | {InferTagMeaning(tag.Name)} |");
+                }
+                result[$"{grp.Key}.md"] = sb.ToString();
+            }
+
+            // ── Words / Events ─────────────────────────────────────────────────
+            if (mwTags.Count > 0)
+            {
+                var sb = new StringBuilder();
+                sb.Append(Hdr("Memórias — Palavras de Alarme e Eventos"));
+                sb.AppendLine("Palavras de registo de alarmes (ALARM_) e eventos de operação (EVENTOS_). " +
+                              "Cada bit dentro destas palavras corresponde a um alarme ou evento específico.");
+                sb.AppendLine();
+                sb.AppendLine("| Variável | Tipo | Endereço | Comentário | Significado Inferido |");
+                sb.AppendLine("|----------|------|----------|------------|---------------------|");
+                foreach (var (_, tag) in mwTags.OrderBy(x => x.Tag.Address))
+                    sb.AppendLine($"| `{Esc(tag.Name)}` | {tag.DataType} | {HumanAddress(tag.Address)} | {(string.IsNullOrWhiteSpace(tag.Comment) ? "—" : Esc(tag.Comment.Trim()))} | {InferTagMeaning(tag.Name)} |");
+                result["mw_alarmes_eventos.md"] = sb.ToString();
+            }
+
+            return result;
+        }
+
+        private static string BuildTagsMd(string deviceName, string installName, List<TagTableInfo> tagTables)
+        {
+            var sb = new StringBuilder();
+
+            // ── Cabeçalho ────────────────────────────────────────────────────────
+            sb.AppendLine($"# Tags — {installName}");
+            sb.AppendLine();
+            sb.AppendLine($"> **PLC:** `{deviceName}`  ");
+            sb.AppendLine($"> **Exportado em:** {DateTime.Now:yyyy-MM-dd HH:mm}  ");
+            sb.AppendLine($"> **Fonte:** TiaTracker — Barragem de Crestuma-Lever");
+            sb.AppendLine();
+            sb.AppendLine("---");
+            sb.AppendLine();
+
+            // ── Recolher e filtrar todos os tags ─────────────────────────────────
+            var allTags = tagTables.SelectMany(tt => tt.Tags
+                .Where(t => !IsAnonymousTag(t))
+                .Select(t => (Table: tt.Name, Tag: t))
+            ).ToList();
+
+            var sysTags = allTags.Where(x => IsSystemTag(x.Tag)).ToList();
+            var diTags  = allTags.Where(x => !IsSystemTag(x.Tag) && GetTagCategory(x.Tag.Address) == "di").ToList();
+            var doTags  = allTags.Where(x => !IsSystemTag(x.Tag) && GetTagCategory(x.Tag.Address) == "do").ToList();
+            var aiTags  = allTags.Where(x => !IsSystemTag(x.Tag) && GetTagCategory(x.Tag.Address) == "ai").ToList();
+            var aoTags  = allTags.Where(x => !IsSystemTag(x.Tag) && GetTagCategory(x.Tag.Address) == "ao").ToList();
+            var mbTags  = allTags.Where(x => !IsSystemTag(x.Tag) && GetTagCategory(x.Tag.Address) == "mb").ToList();
+            var mwTags  = allTags.Where(x => !IsSystemTag(x.Tag) && GetTagCategory(x.Tag.Address) == "mw").ToList();
+
+            // ── Resumo de equipamentos em linguagem simples ───────────────────────
+            AppendEquipmentSummary(sb, deviceName, diTags, doTags);
+
+            int filteredCount = tagTables.SelectMany(t => t.Tags).Count() - allTags.Count;
+            sb.AppendLine($"_Total de tags exportadas: **{allTags.Count}**  |  Tags anónimas filtradas: **{filteredCount}**_");
+            sb.AppendLine();
+            sb.AppendLine("---");
+            sb.AppendLine();
+
+            // ── Secções por categoria ─────────────────────────────────────────────
+            AppendDigitalInputsSubdivided(sb, diTags);
+            AppendDigitalOutputsSubdivided(sb, doTags);
+
+            AppendTagSection(sb, "Entradas Analógicas (%IW / %ID — Int / Real)",
+                "Medições analógicas: níveis, velocidades, tensões, correntes, potências.",
+                aiTags);
+
+            AppendTagSection(sb, "Saídas Analógicas (%QW — Int)",
+                "Setpoints analógicos para variadores de frequência.",
+                aoTags);
+
+            AppendMemoryBitsSubdivided(sb, mbTags);
+
+            AppendTagSection(sb, "Memórias — Words/DWords (%MW / %MD / %MB)",
+                "Palavras de alarme, registo de eventos, contadores e parâmetros.",
+                mwTags);
+
+            // Tags de sistema (informativo, sem destaque)
+            if (sysTags.Count > 0)
+            {
+                sb.AppendLine("## Tags de Sistema S7 (informativo)");
+                sb.AppendLine();
+                sb.AppendLine("> Geradas automaticamente pelo TIA Portal. Não modificar.");
+                sb.AppendLine();
+                sb.AppendLine("| Variável | Tipo | Endereço |");
+                sb.AppendLine("|----------|------|----------|");
+                foreach (var (_, tag) in sysTags.OrderBy(x => x.Tag.Address))
+                    sb.AppendLine($"| `{Esc(tag.Name)}` | {tag.DataType} | `{Esc(tag.Address)}` |");
+                sb.AppendLine();
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Gera uma secção de resumo em linguagem simples dos equipamentos do PLC.
+        /// Este chunk é o primeiro a ser recuperado em queries genéricas ("bomba", "comporta", etc.)
+        /// </summary>
+        private static void AppendEquipmentSummary(StringBuilder sb, string deviceName,
+            List<(string Table, TagInfo Tag)> diTags,
+            List<(string Table, TagInfo Tag)> doTags)
+        {
+            sb.AppendLine("## O que controla este PLC");
+            sb.AppendLine();
+            sb.AppendLine($"Este documento descreve todos os sinais e equipamentos controlados pelo **{deviceName}**.");
+            sb.AppendLine("Pode ser consultado por qualquer pessoa — operador, técnico ou engenheiro — em linguagem natural.");
+            sb.AppendLine("Para cada equipamento físico da eclusa está documentado o sinal correspondente no PLC, o seu endereço de memória e o seu estado esperado.");
+            sb.AppendLine();
+
+            // Motores: detectar pelos RM_ (retorno de marcha = confirmação de motor ligado)
+            var motors = diTags
+                .Where(x => x.Tag.Name.StartsWith("RM_", StringComparison.OrdinalIgnoreCase))
+                .Select(x => x.Tag.Name.Substring(3)) // remove "RM_"
+                .Distinct().OrderBy(n => n).ToList();
+
+            // Actuadores de saída: OS_ e OM_ (ordens de arranque/marcha)
+            var actuators = doTags
+                .Where(x => x.Tag.Name.StartsWith("OS_", StringComparison.OrdinalIgnoreCase)
+                         || x.Tag.Name.StartsWith("OM_", StringComparison.OrdinalIgnoreCase))
+                .Select(x => x.Tag.Name)
+                .Distinct().OrderBy(n => n).ToList();
+
+            // Sensores de posição: FC_ nas entradas
+            var sensors = diTags
+                .Where(x => x.Tag.Name.StartsWith("FC_", StringComparison.OrdinalIgnoreCase))
+                .Select(x => x.Tag.Name)
+                .Distinct().OrderBy(n => n).ToList();
+
+            if (motors.Count > 0)
+            {
+                sb.AppendLine("### Motores e Bombas Hidráulicas");
+                sb.AppendLine();
+                sb.AppendLine("As bombas hidráulicas são os motores elétricos que pressurizam o óleo do circuito hidráulico para mover os pistões (cilindros) das comportas de enchimento.");
+                sb.AppendLine("Quando uma bomba arranca, o contactor fecha e o motor começa a girar — isso é confirmado pelo sinal de retorno de marcha.");
+                sb.AppendLine("Se o motor não arranca, disparou a proteção, ou parou sozinho, o PLC regista um defeito e bloqueia a operação.");
+                sb.AppendLine("Os motores identificados neste PLC são:");
+                sb.AppendLine("| Motor / Bomba | Retorno de Marcha | Ordem de Arranque | Descrição |");
+                sb.AppendLine("|---------------|-------------------|-------------------|-----------|");
+                foreach (var m in motors)
+                {
+                    var rmTag  = $"RM_{m}";
+                    var osTag  = doTags.FirstOrDefault(x =>
+                        x.Tag.Name.StartsWith("OS_", StringComparison.OrdinalIgnoreCase) &&
+                        x.Tag.Name.IndexOf(m.Split('_')[0], StringComparison.OrdinalIgnoreCase) >= 0).Tag?.Name ?? "—";
+                    var desc   = InferTagMeaning(rmTag).Replace("Retorno Marcha — ", "");
+                    sb.AppendLine($"| {desc} | `{rmTag}` | `{osTag}` | {InferTagMeaning(rmTag)} |");
+                }
+                sb.AppendLine();
+            }
+
+            if (sensors.Count > 0)
+            {
+                sb.AppendLine("### Sensores de Posição das Comportas (Fins de Curso)");
+                sb.AppendLine();
+                sb.AppendLine("Os fins de curso são sensores mecânicos instalados nos pistões (cilindros hidráulicos) das comportas.");
+                sb.AppendLine("Cada pistão tem sensores que indicam se chegou ao topo (comporta aberta), se está na posição intermédia (estabilizado), ou se desceu completamente (comporta fechada).");
+                sb.AppendLine("Se o processo de enchimento parar a meio ou não avançar de fase, verificar se o sensor da fase atual confirmou a posição.");
+                sb.AppendLine("| Sensor | Endereço | Descrição |");
+                sb.AppendLine("|--------|----------|-----------|");
+                foreach (var (_, tag) in diTags
+                    .Where(x => x.Tag.Name.StartsWith("FC_", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(x => x.Tag.Address))
+                {
+                    sb.AppendLine($"| `{tag.Name}` | {HumanAddress(tag.Address)} | {InferTagMeaning(tag.Name)} |");
+                }
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("---");
+            sb.AppendLine();
+        }
+
+        /// <summary>
+        /// Entradas Digitais subdivididas por grupo funcional.
+        /// Garante que "motores", "botões", "fins de curso" ficam em chunks separados.
+        /// </summary>
+        private static void AppendDigitalInputsSubdivided(StringBuilder sb,
+            List<(string Table, TagInfo Tag)> diTags)
+        {
+            if (diTags.Count == 0) return;
+
+            static string GetDiGroup(string name)
+            {
+                var up = name.ToUpperInvariant();
+                if (up.StartsWith("RM_")    || up.StartsWith("DEF_ARR") ||
+                    up.StartsWith("PROT_BOMB") || up.StartsWith("PROT_VALV") ||
+                    up.StartsWith("DISP_INT_GER") || up.StartsWith("PROT_ANALIS") ||
+                    up.StartsWith("PROT_DESCARR") || up.StartsWith("DEF_DESCARR") ||
+                    up.StartsWith("ENCARQ_") || up.StartsWith("VARIAD_") ||
+                    up.StartsWith("TRAV_")   || up.StartsWith("FREIO_"))
+                    return "1:Motores e Bombas";
+                if (up.StartsWith("FC_"))
+                    return "2:Fins de Curso — Sensores de Posição";
+                if (up.StartsWith("BT_") || up.StartsWith("STOP_") ||
+                    up.StartsWith("RESET") || up.StartsWith("TEST_"))
+                    return "3:Botões e Comandos do Quadro";
+                if (up.StartsWith("COND_"))
+                    return "4:Condições e Permissões";
+                if (up.StartsWith("DISP_") || up.StartsWith("PRES_"))
+                    return "5:Presenças de Tensão e Disponibilidades";
+                if (up.StartsWith("EMERG_") || up.StartsWith("PS_") ||
+                    up.StartsWith("AL_MOD")  || up.StartsWith("DEF_MOD") ||
+                    up.StartsWith("PROT_24") || up.StartsWith("PRES_24") ||
+                    up.StartsWith("PROT_")   || up.StartsWith("FALT_"))
+                    return "6:Alimentação e Proteções Gerais";
+                if (up.StartsWith("RESERV_") || up.StartsWith("RESERVA_"))
+                    return "7:Entradas Reservadas";
+                return "8:Outros";
+            }
+
+            var groupDesc = new Dictionary<string, string>
+            {
+                { "1:Motores e Bombas",
+                  "As bombas hidráulicas são os motores que pressurizam o óleo para mover os pistões das comportas. " +
+                  "Cada motor tem três sinais de estado: o **retorno de marcha** confirma que o motor está a girar; " +
+                  "o **defeito de arranque** indica que o motor foi comandado mas não arrancou; " +
+                  "a **proteção elétrica** indica que o relé térmico ou disjuntor disparou por sobrecorrente ou sobreaquecimento. " +
+                  "Quando uma bomba ou motor não arranca, para sozinho ou apresenta defeito, verificar nesta ordem: " +
+                  "proteção elétrica disparada → retorno de marcha ausente → defeito de arranque ativo." },
+                { "2:Fins de Curso — Sensores de Posição",
+                  "Os fins de curso são sensores mecânicos instalados nos pistões hidráulicos das comportas de enchimento. " +
+                  "Indicam com precisão a posição física do pistão: subida completa significa que a comporta está totalmente aberta; " +
+                  "estabilizado significa posição intermédia segura; descida completa significa comporta fechada. " +
+                  "Se o processo de enchimento parar ou não avançar para a fase seguinte, " +
+                  "verificar se o sensor de posição da fase atual confirmou o estado esperado." },
+                { "3:Botões e Comandos do Quadro",
+                  "São os botões físicos do quadro elétrico local e os comandos enviados por controlo remoto. " +
+                  "Incluem os botões de subir (abrir), descer (fechar) e stop, a seleção entre modo manual e automático, " +
+                  "e a escolha de qual comporta (A lado direito ou B lado esquerdo) está a ser operada. " +
+                  "Os comandos com sufixo REM vêm do sistema de controlo remoto; os sem sufixo são locais no quadro. " +
+                  "Se o equipamento não responde a um comando, verificar se o botão está ativo e se o modo de operação correto está selecionado." },
+                { "4:Condições e Permissões",
+                  "São sinais de autorização enviados pelos outros PLCs da eclusa — por exemplo o PLC_Comando ou o PLC_Porta_Jusante. " +
+                  "O processo de enchimento só pode iniciar ou continuar quando todas estas condições estão satisfeitas. " +
+                  "Se o enchimento não inicia ou bloqueia inesperadamente, verificar primeiro se todas as condições estão a verdadeiro." },
+                { "5:Presenças de Tensão e Disponibilidades",
+                  "Confirmam que as fontes de alimentação elétrica estão presentes e que os equipamentos principais estão prontos a operar. " +
+                  "Se faltar presença de 400VAC, 220VDC ou 24VDC o sistema bloqueia por segurança. " +
+                  "Verificar estes sinais quando o sistema não arranca sem causa aparente." },
+                { "6:Alimentação e Proteções Gerais",
+                  "Estado das fontes de alimentação do quadro, proteções elétricas gerais e sinal de paragem de emergência. " +
+                  "O sinal de emergência deve estar sempre ativo — se estiver a falso o sistema para completamente e não pode ser comandado. " +
+                  "As fontes de alimentação convertem as tensões para os circuitos de controlo e medição." },
+                { "7:Entradas Reservadas",
+                  "Entradas físicas do módulo de I/O que não estão ligadas a nenhum equipamento atualmente. " +
+                  "Estão reservadas para futuras expansões. O seu estado não influencia o funcionamento do sistema." },
+                { "8:Outros",
+                  "Entradas digitais com função específica não classificada nos grupos anteriores." },
+            };
+
+            var groups = diTags.GroupBy(x => GetDiGroup(x.Tag.Name))
+                               .OrderBy(g => g.Key).ToList();
+
+            sb.AppendLine("## Entradas Digitais (%I — Bool)");
+            sb.AppendLine();
+            sb.AppendLine($"Sinais físicos de entrada do PLC — {diTags.Count} sinais no total, organizados por tipo de equipamento.");
+            sb.AppendLine("As entradas digitais leem o estado real dos equipamentos: se um motor está a girar, se uma comporta está aberta, se um botão foi premido.");
+            sb.AppendLine();
+
+            foreach (var g in groups)
+            {
+                var label = g.Key.Substring(2);
+                sb.AppendLine($"### {label}");
+                sb.AppendLine();
+                if (groupDesc.TryGetValue(g.Key, out var desc))
+                { sb.AppendLine(desc); sb.AppendLine(); }
+                sb.AppendLine("| Variável | Tipo | Endereço | Tabela | Comentário | Significado Inferido |");
+                sb.AppendLine("|----------|------|----------|--------|------------|---------------------|");
+                foreach (var (table, tag) in g.OrderBy(x => x.Tag.Address))
+                {
+                    var cmt = string.IsNullOrWhiteSpace(tag.Comment) ? "—" : Esc(tag.Comment.Trim());
+                    sb.AppendLine($"| `{Esc(tag.Name)}` | {tag.DataType} | {HumanAddress(tag.Address)} | {Esc(table)} | {cmt} | {InferTagMeaning(tag.Name)} |");
+                }
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("---");
+            sb.AppendLine();
+        }
+
+        /// <summary>
+        /// Saídas Digitais subdivididas por grupo funcional.
+        /// </summary>
+        private static void AppendDigitalOutputsSubdivided(StringBuilder sb,
+            List<(string Table, TagInfo Tag)> doTags)
+        {
+            if (doTags.Count == 0) return;
+
+            static string GetDoGroup(string name)
+            {
+                var up = name.ToUpperInvariant();
+                if (up.StartsWith("OS_") || up.StartsWith("OM_") || up.StartsWith("OA_") || up.StartsWith("OD_"))
+                    return "1:Ordens de Arranque e Marcha";
+                if (up.StartsWith("SIN_BOMB") || up.StartsWith("SIN_VALV") ||
+                    up.StartsWith("SIN_COMP") || up.StartsWith("SIN_ESTAB") ||
+                    up.StartsWith("SIN_V2_")  || up.StartsWith("SIN_V_DESC") ||
+                    up.StartsWith("SIN_DEF_COMP") || up.StartsWith("SIN_AG") ||
+                    up.StartsWith("SIN_CIRC"))
+                    return "2:Sinalizações de Comportas e Bombas";
+                if (up.StartsWith("SIN_AUTOM") || up.StartsWith("SIN_DESLIG") ||
+                    up.StartsWith("SIN_MANUAL") || up.StartsWith("SIN_DEF_UN"))
+                    return "3:Sinalizações de Modo de Operação";
+                if (up.StartsWith("SIN_PRES") || up.StartsWith("SIN_FALT") ||
+                    up.StartsWith("SIN_DISP") || up.StartsWith("SIN_DEF_24") ||
+                    up.StartsWith("SIN_EMERG") || up.StartsWith("SIN_DEF_AG") ||
+                    up.StartsWith("CPU_"))
+                    return "4:Sinalizações de Alimentação e Defeitos Gerais";
+                if (up.StartsWith("INTERF_") || up.StartsWith("INT_"))
+                    return "5:Interface para PLC Comando";
+                if (up.StartsWith("BYPASS_") || up.StartsWith("BY_PASS_"))
+                    return "6:Bypass de Segurança";
+                if (up.StartsWith("SEMAF_"))
+                    return "7:Semáforos Náuticos";
+                if (up.StartsWith("RESERV_") || up.StartsWith("RESERVA_"))
+                    return "8:Saídas Reservadas";
+                return "9:Outros";
+            }
+
+            var groupDesc = new Dictionary<string, string>
+            {
+                { "1:Ordens de Arranque e Marcha",
+                  "São os comandos que o PLC envia aos equipamentos físicos para os ligar, desligar ou mover. " +
+                  "Uma ordem de start (OS_) arranca um motor ou bomba; uma ordem de marcha (OM_) abre ou fecha uma válvula hidráulica. " +
+                  "Quando o PLC emite uma ordem de arranque, espera receber o retorno de marcha correspondente nas entradas — " +
+                  "se o retorno não chegar dentro do tempo previsto, regista um defeito de arranque." },
+                { "2:Sinalizações de Comportas e Bombas",
+                  "São as lâmpadas e indicações luminosas no painel sinótico e no quadro elétrico que mostram o estado atual das comportas e bombas. " +
+                  "Indicam visualmente se uma comporta está aberta, fechada ou em movimento, e se uma bomba está ligada. " +
+                  "Estas saídas não comandam equipamentos — apenas sinalizam o estado para os operadores." },
+                { "3:Sinalizações de Modo de Operação",
+                  "Indicam o modo de funcionamento atual do sistema: automático (o PLC controla sozinho), manual (o operador controla) ou desligado. " +
+                  "Também indicam quando existe um defeito na unidade hidráulica. " +
+                  "Se o modo de operação estiver errado, os comandos podem não funcionar como esperado." },
+                { "4:Sinalizações de Alimentação e Defeitos Gerais",
+                  "Indicam o estado das alimentações elétricas e defeitos gerais do quadro. " +
+                  "Incluem lâmpadas de presença de 400VAC e 220VDC, falta de tensão, e estado geral do sistema. " +
+                  "Se estas lâmpadas indicarem defeito, verificar as fontes de alimentação antes de qualquer outra ação." },
+                { "5:Interface para PLC Comando",
+                  "Não são saídas para equipamentos físicos — são impulsos de comunicação enviados ao PLC_Comando. " +
+                  "O PLC_Comando coordena toda a eclusa e precisa de saber o estado do enchimento para gerir as autorizações. " +
+                  "Se existir falha de comunicação entre PLCs, estas saídas podem estar envolvidas." },
+                { "6:Bypass de Segurança",
+                  "Saídas que ativam condições de bypass — contornam uma condição de segurança para permitir operação em modo de manutenção. " +
+                  "Usar com precaução: quando ativo, o sistema pode operar sem todas as proteções habituais." },
+                { "7:Semáforos Náuticos",
+                  "Sinalizações luminosas visíveis pelas embarcações que aguardam entrada ou saída da eclusa. " +
+                  "Controlam o tráfego fluvial durante as operações de enchimento e esvaziamento." },
+                { "8:Saídas Reservadas",
+                  "Saídas físicas do módulo de I/O que não estão ligadas a nenhum equipamento atualmente. Reservadas para expansão futura." },
+                { "9:Outros",
+                  "Saídas digitais com função específica não classificada nos grupos anteriores." },
+            };
+
+            var groups = doTags.GroupBy(x => GetDoGroup(x.Tag.Name))
+                               .OrderBy(g => g.Key).ToList();
+
+            sb.AppendLine("## Saídas Digitais (%Q — Bool)");
+            sb.AppendLine();
+            sb.AppendLine($"Sinais físicos de saída do PLC — {doTags.Count} sinais no total, organizados por função.");
+            sb.AppendLine("As saídas digitais comandam os equipamentos: ligam motores, abrem válvulas, acendem lâmpadas de sinalização.");
+            sb.AppendLine();
+
+            foreach (var g in groups)
+            {
+                var label = g.Key.Substring(2);
+                sb.AppendLine($"### {label}");
+                sb.AppendLine();
+                if (groupDesc.TryGetValue(g.Key, out var desc))
+                { sb.AppendLine(desc); sb.AppendLine(); }
+                sb.AppendLine("| Variável | Tipo | Endereço | Tabela | Comentário | Significado Inferido |");
+                sb.AppendLine("|----------|------|----------|--------|------------|---------------------|");
+                foreach (var (table, tag) in g.OrderBy(x => x.Tag.Address))
+                {
+                    var cmt = string.IsNullOrWhiteSpace(tag.Comment) ? "—" : Esc(tag.Comment.Trim());
+                    sb.AppendLine($"| `{Esc(tag.Name)}` | {tag.DataType} | {HumanAddress(tag.Address)} | {Esc(table)} | {cmt} | {InferTagMeaning(tag.Name)} |");
+                }
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("---");
+            sb.AppendLine();
+        }
+
+        /// <summary>
+        /// Gera a secção "Memórias — Bits" subdividida por grupo semântico,
+        /// evitando chunks demasiado grandes no RAG.
+        /// </summary>
+        private static void AppendMemoryBitsSubdivided(StringBuilder sb,
+            List<(string Table, TagInfo Tag)> mbTags)
+        {
+            if (mbTags.Count == 0) return;
+
+            // Classificar cada merker no seu grupo semântico
+            static string GetGroup(string name)
+            {
+                var up = (name ?? "").ToUpperInvariant();
+                if (up.StartsWith("DEF_"))    return "1:Defeitos";
+                if (up.StartsWith("AL_"))     return "2:Alarmes";
+                if (up.StartsWith("REG_"))    return "3:Registos de Estado";
+                if (up.StartsWith("IMP_") || up.StartsWith("INTERF_"))
+                                              return "4:Impulsos e Interfaces";
+                if (up.StartsWith("INTERD_") || up.StartsWith("AUTOR_") || up.StartsWith("COND_"))
+                                              return "5:Interdições e Autorizações";
+                if (up.StartsWith("ENT_") || up.StartsWith("SAID_"))
+                                              return "6:Permissões de Navegação";
+                if (up.StartsWith("FC_ENCOD_"))
+                                              return "7:Fins de Curso Encoder";
+                if (up.StartsWith("M_"))      return "8:Memórias de Controlo";
+                return "9:Outros Merkers";
+            }
+
+            var groupDesc = new Dictionary<string, string>
+            {
+                { "1:Defeitos",
+                  "Os bits de defeito ficam a verdadeiro quando um equipamento falha ou está em estado de erro. " +
+                  "Um defeito ativo bloqueia a operação do equipamento afetado e normalmente acende uma lâmpada de alarme no painel. " +
+                  "Para repor um defeito é necessário corrigir a causa (por exemplo repor a proteção elétrica) e depois fazer reset ao sistema. " +
+                  "Se existirem vários defeitos ativos ao mesmo tempo, resolver primeiro os defeitos de alimentação elétrica e emergência." },
+                { "2:Alarmes",
+                  "Os alarmes indicam condições anormais do processo — por exemplo velocidade fora dos limites, pressão baixa ou tempo excedido. " +
+                  "Um alarme não bloqueia necessariamente a operação mas indica que algo não está dentro dos parâmetros normais. " +
+                  "Alarmes de velocidade (VELOC) indicam que o pistão está a mover-se demasiado rápido ou demasiado lento em relação ao esperado." },
+                { "3:Registos de Estado",
+                  "Os registos guardam o estado atual do ciclo de operação: se o sistema está em automático ou manual, " +
+                  "que fase do enchimento está ativa, se a comporta A ou B está selecionada, se os pistões estão na posição correta. " +
+                  "Quando algo falha durante o enchimento, consultar os registos de estado para perceber em que fase o processo estava." },
+                { "4:Impulsos e Interfaces",
+                  "São sinais de comunicação entre este PLC e os outros PLCs da eclusa. " +
+                  "Um impulso é ativado momentaneamente para informar outro PLC de um evento — por exemplo que o enchimento terminou. " +
+                  "Não representam equipamentos físicos. Se existir falha de coordenação entre PLCs, verificar estes bits." },
+                { "5:Interdições e Autorizações",
+                  "Controlam as permissões de manobra: uma interdição bloqueia uma operação por razões de segurança; " +
+                  "uma autorização permite que uma operação avance. " +
+                  "Se o sistema não executa uma manobra esperada, verificar se existe alguma interdição ativa ou autorização em falta." },
+                { "6:Permissões de Navegação",
+                  "Controlam a autorização de entrada e saída de embarcações na eclusa. " +
+                  "Estes bits comunicam com o PLC_Comando para coordenar o tráfego fluvial durante o enchimento." },
+                { "7:Fins de Curso Encoder",
+                  "Posições calculadas por encoder — o PLC calcula a posição do pistão a partir do número de pulsos do encoder, " +
+                  "em vez de depender apenas dos sensores mecânicos. Permite posicionamento mais preciso e deteção de desvios." },
+                { "8:Memórias de Controlo",
+                  "Bits internos que guardam estados intermédios do controlo dos atuadores: " +
+                  "se uma ordem de subida ou descida está ativa, se está em pausa, se existe diferença de posição entre os dois lados. " +
+                  "São usados internamente pelo programa e não correspondem a sinais físicos." },
+                { "9:Outros Merkers",
+                  "Bits de memória interna com funções diversas: clocks de temporização, resets, flags de operação e sinalizações internas." },
+            };
+
+            var groups = mbTags
+                .GroupBy(x => GetGroup(x.Tag.Name))
+                .OrderBy(g => g.Key)
+                .ToList();
+
+            sb.AppendLine("## Memórias — Bits (%M — Bool)");
+            sb.AppendLine();
+            sb.AppendLine($"Bits de memória interna do PLC — {mbTags.Count} no total, organizados por função.");
+            sb.AppendLine("As memórias não correspondem a sinais físicos — são variáveis internas que o programa usa para guardar estados, defeitos, alarmes e registos de operação.");
+            sb.AppendLine();
+
+            foreach (var g in groups)
+            {
+                var label = g.Key.Substring(2); // remover prefixo de ordenação "1:"
+                sb.AppendLine($"### {label}");
+                sb.AppendLine();
+                if (groupDesc.TryGetValue(g.Key, out var desc))
+                {
+                    sb.AppendLine(desc);
+                    sb.AppendLine();
+                }
+                sb.AppendLine("| Variável | Tipo | Endereço | Tabela | Comentário | Significado Inferido |");
+                sb.AppendLine("|----------|------|----------|--------|------------|---------------------|");
+                foreach (var (table, tag) in g.OrderBy(x => x.Tag.Address))
+                {
+                    var cmt = string.IsNullOrWhiteSpace(tag.Comment) ? "—" : Esc(tag.Comment.Trim());
+                    var inf = InferTagMeaning(tag.Name);
+                    sb.AppendLine($"| `{Esc(tag.Name)}` | {tag.DataType} | {HumanAddress(tag.Address)} | {Esc(table)} | {cmt} | {inf} |");
+                }
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("---");
+            sb.AppendLine();
+        }
+
+        private static void AppendTagSection(StringBuilder sb, string title, string description,
+            List<(string Table, TagInfo Tag)> tags)
+        {
+            if (tags.Count == 0) return;
+            sb.AppendLine($"## {title}");
+            sb.AppendLine();
+            sb.AppendLine($"> {description}");
+            sb.AppendLine();
+            sb.AppendLine("| Variável | Tipo | Endereço | Tabela | Comentário | Significado Inferido |");
+            sb.AppendLine("|----------|------|----------|--------|------------|---------------------|");
+            foreach (var (table, tag) in tags.OrderBy(x => x.Tag.Address))
+            {
+                var cmt = string.IsNullOrWhiteSpace(tag.Comment) ? "—" : Esc(tag.Comment.Trim());
+                var inf = InferTagMeaning(tag.Name);
+                sb.AppendLine($"| `{Esc(tag.Name)}` | {tag.DataType} | {HumanAddress(tag.Address)} | {Esc(table)} | {cmt} | {inf} |");
+            }
+            sb.AppendLine();
+            sb.AppendLine("---");
+            sb.AppendLine();
+        }
+
+        /// <summary>Tag anónima sem utilidade para o RAG — filtrar.</summary>
+        private static bool IsAnonymousTag(TagInfo tag)
+        {
+            var name = (tag.Name ?? "").Trim();
+            // Tag_1 ... Tag_N
+            if (Regex.IsMatch(name, @"^Tag_\d+$")) return true;
+            // Tag_M209.0, Tag_M212.3 etc.
+            if (Regex.IsMatch(name, @"^Tag_[A-Z]+\d+\.\d+$")) return true;
+            // Tag_80 com tipo Hw_Device
+            if (Regex.IsMatch(name, @"^Tag_\d+$") && tag.DataType == "Hw_Device") return true;
+            return false;
+        }
+
+        /// <summary>Tags geradas automaticamente pelo sistema S7.</summary>
+        private static bool IsSystemTag(TagInfo tag)
+        {
+            var name = (tag.Name ?? "").Trim();
+            return name == "FirstScan"       || name == "DiagStatusUpdate" ||
+                   name == "AlwaysTRUE"      || name == "AlwaysFALSE"      ||
+                   name == "System_Byte"     || name == "Clock_Byte"        ||
+                   name.StartsWith("Clock_");
+        }
+
+        /// <summary>
+        /// Converte endereço Siemens (%I3.2, %Q4.0, %M10.0, etc.) para formato legível
+        /// sem o símbolo %, de modo a que o embedding semântico funcione correctamente.
+        /// Exemplo: %I3.2 → "Entrada I3.2" | %Q4.0 → "Saída Q4.0" | %M10.0 → "Memória M10.0"
+        /// </summary>
+        private static string HumanAddress(string address)
+        {
+            if (string.IsNullOrWhiteSpace(address)) return address ?? "";
+            var a = address.TrimStart('%');
+            var up = a.ToUpperInvariant();
+            if      (up.StartsWith("IW") || up.StartsWith("ID") || up.StartsWith("IB")) return $"Entrada Word {a}";
+            if      (up.StartsWith("QW") || up.StartsWith("QD") || up.StartsWith("QB")) return $"Saída Word {a}";
+            if      (up.StartsWith("MW") || up.StartsWith("MD") || up.StartsWith("MB")) return $"Memória Word {a}";
+            if      (up.StartsWith("I"))  return $"Entrada {a}";
+            if      (up.StartsWith("Q"))  return $"Saída {a}";
+            if      (up.StartsWith("M"))  return $"Memória {a}";
+            return a;
+        }
+
+        /// <summary>
+        /// Decompõe o nome da tag em tokens e constrói uma descrição em português.
+        /// Exemplo: RM_BOMB_A → "Retorno Marcha — Bomba A"
+        /// </summary>
+        private static string InferTagMeaning(string tagName)
+        {
+            if (string.IsNullOrWhiteSpace(tagName)) return "—";
+
+            var tokenMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                // Functional prefixes
+                { "DEF",      "Defeito" },        { "AL",      "Alarme" },
+                { "SIN",      "Sinal" },           { "MC",      "Mapa Controlo" },
+                { "BS",       "Barr./Sin." },      { "OM",      "Ordem Marcha" },
+                { "OA",       "Ordem Abertura" },  { "OD",      "Ordem Direta" },
+                { "OS",       "Ordem Start" },     { "RM",      "Retorno Marcha" },
+                { "FC",       "Fim de Curso" },    { "ENCOD",   "Encoder" },
+                { "BT",       "Botão" },           { "PROT",    "Proteção" },
+                { "PRES",     "Presença Tens." },  { "DISP",    "Disponível" },
+                { "COND",     "Condição" },        { "INP",     "Input Analóg." },
+                { "REG",      "Registo" },         { "EV",      "Evento" },
+                { "IMP",      "Impulso" },         { "ENT",     "Entrada Nav." },
+                { "SAID",     "Saída Nav." },      { "INTERD",  "Interdição" },
+                { "AUTOR",    "Autorização" },     { "SEMAF",   "Semáforo" },
+                { "BYPASS",   "Bypass" },          { "BY",      "Bypass" },
+                { "HMI",      "Cmd HMI" },         { "VARIAD",  "Variador" },
+                { "SP",       "SetPoint" },        { "ESTAD",   "Estado" },
+                { "VELOC",    "Velocidade" },      { "INTENS",  "Intensidade" },
+                { "TRAV",     "Travão" },          { "FREIO",   "Freio" },
+                { "ENCARQ",   "Sobrec.Corr." },    { "CORR",    "Corrente" },
+                { "ESF",      "Esforço" },         { "FALT",    "Falta" },
+                { "PRESS",    "Pressão" },         { "LIG",     "Ligar" },
+                { "INTERF",   "Interface→Cmd" },   { "K",       "Relé K" },
+                { "RESERV",   "Reserva" },         { "RESERVA", "Reserva" },
+                { "ALARM",    "Alarmes" },         { "EVENTOS", "Eventos" },
+                { "VAR",      "Variador" },        { "PASS",    "Passagem" },
+                { "PASS2",    "Passagem2" },
+                // Equipment tokens
+                { "BOMB",     "Bomba" },           { "MOTOR",   "Motor" },
+                { "VALV",     "Válvula" },         { "COMP",    "Comporta" },
+                { "PORTA",    "Porta" },           { "ECLUSA",  "Eclusa" },
+                { "CAMARA",   "Câmara" },          { "NIVEL",   "Nível" },
+                { "DIST",     "Distribuição" },    { "HIDRO",   "Hidráulico" },
+                { "CIRC",     "Circuito" },        { "CENT",    "Central" },
+                { "UPS",      "UPS" },             { "TRAFO",   "Transformador" },
+                { "REDE",     "Rede" },            { "EMERG",   "Emergência" },
+                { "PILOT",    "Piloto" },          { "TUNEL",   "Túnel" },
+                // Position / state suffixes
+                { "MONT",     "Montante" },        { "JUS",     "Jusante" },
+                { "DIR",      "Direita" },         { "ESQ",     "Esquerda" },
+                { "SUB",      "Subida" },          { "DESC",    "Descida" },
+                { "AB",       "Aberta" },          { "AUT",     "Auto" },
+                { "MAN",      "Manual" },          { "LOC",     "Local" },
+                { "REM",      "Remoto" },          { "ALT",     "Alta" },
+                { "LENT",     "Lenta" },           { "RAP",     "Rápida" },
+                { "MAX",      "Máx." },            { "MIN",     "Mín." },
+                { "A",        "A" },               { "B",       "B" },
+                { "C",        "C" },               { "V",       "V" },
+            };
+
+            var parts = tagName.Split(new[] { '_' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) return "—";
+
+            string Translate(string p) =>
+                tokenMap.TryGetValue(p, out var v) ? v : p;
+
+            var first = Translate(parts[0]);
+            if (parts.Length == 1) return first;
+
+            var rest = string.Join(" ", parts.Skip(1).Select(Translate));
+            return $"{first} — {rest}";
+        }
+
+        /// <summary>Categoriza a tag pelo prefixo do endereço.</summary>
+        private static string GetTagCategory(string address)
+        {
+            var a = (address ?? "").Trim();
+            if (a.StartsWith("%IW") || a.StartsWith("%ID") || a.StartsWith("%IB")) return "ai";
+            if (a.StartsWith("%QW") || a.StartsWith("%QD") || a.StartsWith("%QB")) return "ao";
+            if (a.StartsWith("%I"))  return "di";
+            if (a.StartsWith("%Q"))  return "do";
+            if (a.StartsWith("%MW") || a.StartsWith("%MD") || a.StartsWith("%MB")) return "mw";
+            if (a.StartsWith("%M"))  return "mb";
+            return "other";
+        }
+
         private void SaveMd()
         {
             if (_mdResult == null) return;
+            var installName = AskInstallationName(Path.GetFileNameWithoutExtension(_txtPath.Text));
+            if (installName == null) return;
+            var md = BuildMarkdown(_blocks, _tagTables, _udts, _hwDevices, _txtPath.Text, installName);
             using var dlg = new SaveFileDialog
             {
                 Title    = "Exportar Markdown para IA",
@@ -2212,9 +3368,73 @@ namespace TiaTracker.UI
             };
             if (dlg.ShowDialog() == DialogResult.OK)
             {
-                File.WriteAllText(dlg.FileName, _mdResult, Encoding.UTF8);
-                SetStatus($"Markdown exportado: {Path.GetFileName(dlg.FileName)}", C_OK);
+                File.WriteAllText(dlg.FileName, md, Encoding.UTF8);
+                var lines = md.Count(c => c == '\n');
+                SetStatus($"Markdown exportado: {Path.GetFileName(dlg.FileName)}  ({lines:N0} linhas)", C_OK);
             }
+        }
+
+        // ── Diálogo: Nome da Instalação ────────────────────────────────────────
+        private static string AskInstallationName(string defaultName)
+        {
+            using var form = new Form
+            {
+                Text            = "Identificar Instalação",
+                Size            = new Size(440, 170),
+                StartPosition   = FormStartPosition.CenterScreen,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox     = false,
+                MinimizeBox     = false,
+                BackColor       = Color.FromArgb(22, 27, 34),
+                ForeColor       = Color.FromArgb(201, 209, 217),
+                Font            = new Font("Segoe UI", 9f)
+            };
+
+            var lbl = new Label
+            {
+                Text      = "Nome da instalação (ex: Eclusa de Crestuma):",
+                AutoSize  = true,
+                Location  = new Point(14, 18),
+                ForeColor = Color.FromArgb(201, 209, 217)
+            };
+            var txt = new TextBox
+            {
+                Text        = defaultName ?? "",
+                Location    = new Point(14, 42),
+                Width       = 400,
+                BackColor   = Color.FromArgb(33, 38, 50),
+                ForeColor   = Color.FromArgb(201, 209, 217),
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            var btnOk = new Button
+            {
+                Text          = "OK",
+                DialogResult  = DialogResult.OK,
+                Location      = new Point(224, 86),
+                Width         = 88,
+                Height        = 28,
+                BackColor     = Color.FromArgb(31, 111, 235),
+                ForeColor     = Color.White,
+                FlatStyle     = FlatStyle.Flat
+            };
+            btnOk.FlatAppearance.BorderSize = 0;
+            var btnCancel = new Button
+            {
+                Text          = "Cancelar",
+                DialogResult  = DialogResult.Cancel,
+                Location      = new Point(320, 86),
+                Width         = 94,
+                Height        = 28,
+                BackColor     = Color.FromArgb(33, 38, 50),
+                ForeColor     = Color.FromArgb(201, 209, 217),
+                FlatStyle     = FlatStyle.Flat
+            };
+            btnCancel.FlatAppearance.BorderSize = 0;
+            form.AcceptButton = btnOk;
+            form.CancelButton = btnCancel;
+            form.Controls.AddRange(new Control[] { lbl, txt, btnOk, btnCancel });
+
+            return form.ShowDialog() == DialogResult.OK ? txt.Text.Trim() : null;
         }
 
         private void SaveXml()
